@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   ArrowDownLeft,
@@ -30,6 +31,7 @@ import {
   UsersRound,
   X,
   Zap,
+  FileBadge,
 } from "lucide-react";
 import gsap from "gsap";
 
@@ -45,13 +47,40 @@ type Profile = {
   bio: string;
 };
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+type AuthUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: "member" | "admin";
+  isActive: boolean;
+};
+type MembershipPlanData = {
+  name: string;
+  slug: string;
+  price: number;
+  billingType: "yearly" | "one_time";
+  durationDays: number | null;
+  features: string[];
+};
+
+type UserMembership = {
+  membershipId: string;
+  status: "pending" | "active" | "expired" | "cancelled";
+  startDate: string | null;
+  endDate: string | null;
+  createdAt: string;
+  plan: MembershipPlanData | null;
+};
 const initialProfile: Profile = {
-  name: "Alex Morgan",
-  email: "alex@example.com",
-  phone: "+1 555 010 2020",
-  organization: "Morgan Creative Studio",
-  address: "New York, United States",
-  bio: "Building meaningful connections through community and collaboration.",
+  name: "",
+  email: "",
+  phone: "",
+  organization: "",
+  address: "",
+  bio: "",
 };
 
 const payments: {
@@ -61,40 +90,7 @@ const payments: {
   amount: number;
   status: PaymentStatus;
   method: string;
-}[] = [
-  {
-    id: "MBX-2026-1042",
-    description: "Premium Membership",
-    date: "Oct 12, 2026",
-    amount: 149,
-    status: "Completed",
-    method: "Visa •••• 4242",
-  },
-  {
-    id: "MBX-2026-0981",
-    description: "Membership Renewal",
-    date: "Sep 12, 2026",
-    amount: 149,
-    status: "Completed",
-    method: "Visa •••• 4242",
-  },
-  {
-    id: "MBX-2026-0835",
-    description: "Community Event",
-    date: "Aug 24, 2026",
-    amount: 35,
-    status: "Pending",
-    method: "Bank transfer",
-  },
-  {
-    id: "MBX-2026-0714",
-    description: "Membership Renewal",
-    date: "Aug 12, 2026",
-    amount: 149,
-    status: "Completed",
-    method: "Visa •••• 4242",
-  },
-];
+}[] = [];
 
 const navigation: { name: Section; icon: typeof LayoutDashboard }[] = [
   { name: "Overview", icon: LayoutDashboard },
@@ -105,22 +101,20 @@ const navigation: { name: Section; icon: typeof LayoutDashboard }[] = [
 ];
 
 const money = (amount: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  `৳${new Intl.NumberFormat("en-BD", {
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(amount)}`;
 
 function StatusBadge({ status }: { status: PaymentStatus }) {
-  const styles: Record<PaymentStatus, string> = {
-    Completed: "bg-emerald-500/10 text-emerald-600",
-    Pending: "bg-amber-500/10 text-amber-600",
-    Failed: "bg-red-500/10 text-red-500",
+  const statusStyles: Record<PaymentStatus, string> = {
+    Completed: "bg-emerald-100 text-emerald-700",
+    Pending: "bg-amber-100 text-[var(--dark-muted)]",
+    Failed: "bg-red-100 text-red-700",
   };
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${styles[status]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles[status]}`}
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
       {status}
@@ -129,6 +123,13 @@ function StatusBadge({ status }: { status: PaymentStatus }) {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
+const [authLoading, setAuthLoading] = useState(true);
+const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+const [memberships, setMemberships] = useState<UserMembership[]>([]);
+const [membershipLoading, setMembershipLoading] = useState(true);
+const [membershipError, setMembershipError] = useState("");
+const [loggingOut, setLoggingOut] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("Overview");
   const [profile, setProfile] = useState<Profile>(initialProfile);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -137,25 +138,184 @@ export default function DashboardPage() {
   const [productUpdates, setProductUpdates] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<
+  "All" | PaymentStatus
+>("All");
   const [notice, setNotice] = useState("");
   const [saved, setSaved] = useState(false);
+  const [certificateOpen, setCertificateOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3000);
   }, []);
+  
 
+
+  
+  useEffect(() => {
+  let cancelled = false;
+
+  async function verifySession() {
+    try {
+      const response = await fetch(`${API_URL}/api/auth/me`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        router.replace("/login");
+        return;
+      }
+
+      const payload = await response.json();
+      const user = payload?.user ?? payload?.data?.user;
+
+      if (!user || !(user.id || user._id) || !user.email) {
+        router.replace("/login");
+        return;
+      }
+
+      if (!cancelled) {
+        setAuthUser({
+          id: String(user.id ?? user._id),
+          name: String(user.name),
+          email: String(user.email),
+          role: user.role === "admin" ? "admin" : "member",
+          isActive: user.isActive !== false,
+        });
+
+        setProfile((current) => ({
+          ...current,
+          name: String(user.name),
+          email: String(user.email),
+        }));
+      }
+    } catch {
+      router.replace("/login");
+    } finally {
+      if (!cancelled) setAuthLoading(false);
+    }
+  }
+
+  void verifySession();
+
+  return () => {
+    cancelled = true;
+  };
+}, [router]);
+ useEffect(() => {
+  if (authLoading || !authUser) return;
+
+  let cancelled = false;
+
+  async function loadMemberships() {
+    setMembershipLoading(true);
+    setMembershipError("");
+
+    try {
+      const response = await fetch(`${API_URL}/api/memberships/me`, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      const payload: unknown = await response.json();
+
+      if (
+        typeof payload !== "object" ||
+        payload === null
+      ) {
+        throw new Error("Invalid membership response.");
+      }
+
+      const data = payload as {
+        success?: unknown;
+        memberships?: unknown;
+        message?: unknown;
+      };
+
+      if (
+        !response.ok ||
+        data.success !== true ||
+        !Array.isArray(data.memberships)
+      ) {
+        throw new Error(
+          typeof data.message === "string"
+            ? data.message
+            : "Unable to load membership information.",
+        );
+      }
+
+      if (!cancelled) {
+        setMemberships(data.memberships as UserMembership[]);
+      }
+    } catch (error) {
+      if (!cancelled) {
+        setMembershipError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load membership information.",
+        );
+      }
+    } finally {
+      if (!cancelled) {
+        setMembershipLoading(false);
+      }
+    }
+  }
+
+  void loadMemberships();
+
+  return () => {
+    cancelled = true;
+  };
+}, [authUser, authLoading]);
+const handleLogout = async () => {
+  if (loggingOut) return;
+
+  setLoggingOut(true);
+
+  try {
+    await fetch(`${API_URL}/api/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch {
+    // Continue to login.
+  } finally {
+    localStorage.removeItem("membrix-demo-profile");
+    setAuthUser(null);
+    router.replace("/login");
+    router.refresh();
+  }
+};
     useEffect(() => {
     const loadSavedSettings = () => {
       try {
-        const storedProfile = localStorage.getItem("membrix-demo-profile");
+       const storedProfile = localStorage.getItem("membrix-demo-profile");
 
-        if (storedProfile) {
-          const parsedProfile: Partial<Profile> = JSON.parse(storedProfile);
+if (storedProfile) {
+  const parsedProfile: Partial<Profile> = JSON.parse(storedProfile);
 
-          setProfile({ ...initialProfile, ...parsedProfile });
-        }
+  const isOldDemoProfile =
+    parsedProfile.name === "Alex Morgan" ||
+    parsedProfile.email === "alex@example.com" ||
+    parsedProfile.organization === "Morgan Creative Studio" ||
+    parsedProfile.address === "New York, United States";
+
+  if (isOldDemoProfile) {
+    localStorage.removeItem("membrix-demo-profile");
+  } else {
+    setProfile((current) => ({
+      ...current,
+      ...parsedProfile,
+      name: current.name,
+      email: current.email,
+    }));
+  }
+}
 
         const storedTheme = localStorage.getItem("membrix-theme");
         const isDark = storedTheme === "dark";
@@ -202,6 +362,7 @@ export default function DashboardPage() {
   const changeTheme = (nextDark: boolean) => {
     setDarkMode(nextDark);
 
+
     const theme = nextDark ? "dark" : "light";
     localStorage.setItem("membrix-theme", theme);
     document.documentElement.setAttribute("data-theme", theme);
@@ -231,13 +392,31 @@ export default function DashboardPage() {
     setMobileMenuOpen(false);
     setSearchQuery("");
   };
+const totalPaid = payments
+  .filter((payment) => payment.status === "Completed")
+  .reduce((total, payment) => total + payment.amount, 0);
 
-  const filteredPayments = payments.filter((payment) =>
+const completedCount = payments.filter(
+  (payment) => payment.status === "Completed"
+).length;
+
+const pendingAmount = payments
+  .filter((payment) => payment.status === "Pending")
+  .reduce((total, payment) => total + payment.amount, 0);
+ const filteredPayments = payments.filter((payment) => {
+  const query = searchQuery.trim().toLowerCase();
+
+  const matchesSearch =
     `${payment.id} ${payment.description} ${payment.method} ${payment.status}`
       .toLowerCase()
-      .includes(searchQuery.toLowerCase())
-  );
+      .includes(query);
 
+  const matchesStatus =
+    paymentStatusFilter === "All" ||
+    payment.status === paymentStatusFilter;
+
+  return matchesSearch && matchesStatus;
+});
   const sidebar = (
     <>
       <div className="flex items-center justify-between px-5 pb-8 pt-5">
@@ -249,7 +428,7 @@ export default function DashboardPage() {
           <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--foreground)] text-[var(--background)]">
             <UsersRound size={21} />
           </span>
-          <span className="text-xl font-semibold tracking-tight">membrix<span className="text-teal-600">.</span></span>
+          <span className="text-xl font-semibold tracking-tight">membrix<span className="text-[var(--gold)]">.</span></span>
         </Link>
         <button
           type="button"
@@ -312,20 +491,23 @@ export default function DashboardPage() {
 
       <div className="mt-auto p-4">
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-teal-500/10 text-teal-600">
+          <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--gold)]/10 text-[var(--gold)]">
             <Sparkles size={18} />
           </div>
-          <p className="text-sm font-semibold">Your community, closer.</p>
-          <p className="mt-1.5 text-xs leading-5 text-[var(--muted-foreground)]">
-            Stay connected with your Membrix membership.
-          </p>
-          <button
-            type="button"
-            onClick={() => navigateTo("My Membership")}
-            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-teal-600"
-          >
-            View membership <ArrowRight size={13} />
-          </button>
+          <h2 className="text-2xl font-semibold tracking-tight text-[var(--foreground)] sm:text-3xl">
+  Your community, closer.
+</h2>
+
+<p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+  Stay connected with your Membrix membership.
+</p>
+         <button
+  type="button"
+  onClick={() => navigateTo("My Membership")}
+  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[var(--gold)] px-4 py-3 text-xs font-semibold text-black transition-opacity hover:opacity-90"
+>
+  View membership <ArrowRight size={13} />
+</button>
         </div>
 
         <Link
@@ -338,6 +520,15 @@ export default function DashboardPage() {
     </>
   );
 
+    if (authLoading || !authUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
+        <p className="text-sm text-[var(--muted-foreground)]">
+          Checking your Membrix account...
+        </p>
+      </div>
+    );
+  }
   return (
     <div
       ref={rootRef}
@@ -402,7 +593,7 @@ export default function DashboardPage() {
                 >
                   <Bell size={17} />
                   {notifications && (
-                    <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-teal-500" />
+                    <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[var(--gold)]" />
                   )}
                 </button>
                 <button
@@ -411,7 +602,7 @@ export default function DashboardPage() {
                   className="flex items-center gap-2 rounded-full pl-1 transition-opacity hover:opacity-80"
                   aria-label="Open profile"
                 >
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-600 text-xs font-semibold text-white">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--gold)] text-xs font-semibold text-white">
                     {profile.name
                       .split(" ")
                       .map((part) => part[0])
@@ -437,7 +628,7 @@ export default function DashboardPage() {
             {notice && (
               <div
                 role="status"
-                className="mb-5 flex items-center gap-2 rounded-xl border border-teal-500/20 bg-teal-500/10 px-4 py-3 text-sm text-teal-700 dark:text-teal-300"
+                className="mb-5 flex items-center gap-2 rounded-xl border border-[var(--gold)]/20 bg-[var(--gold)]/10 px-4 py-3 text-sm text-[var(--gold)] dark:text-[var(--gold-bright)]"
               >
                 <CheckCircle2 size={17} /> {notice}
                 <button
@@ -455,19 +646,19 @@ export default function DashboardPage() {
               <div className="space-y-7">
                 <section
                   data-dashboard-reveal
-                  className="relative overflow-hidden rounded-3xl bg-[#102b46] p-6 text-white sm:p-9 xl:p-11"
+                  className="relative overflow-hidden rounded-3xl bg-[var(--dark-panel)] p-6 text-white sm:p-9 xl:p-11"
                 >
                   <div className="pointer-events-none absolute -right-16 -top-28 h-72 w-72 rounded-full border border-white/10 sm:h-96 sm:w-96" />
                   <div className="pointer-events-none absolute -right-2 top-12 h-48 w-48 rounded-full border border-white/10 sm:h-64 sm:w-64" />
-                  <div className="pointer-events-none absolute bottom-0 right-20 h-36 w-36 rounded-full bg-teal-500/20 blur-3xl" />
+                  <div className="pointer-events-none absolute bottom-0 right-20 h-36 w-36 rounded-full bg-[var(--gold)]/20 blur-3xl" />
                   <div className="relative z-10 max-w-2xl">
                     <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs text-white/85">
-                      <span className="h-1.5 w-1.5 rounded-full bg-teal-300" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--gold-bright)]" />
                       Your member space
                     </div>
                     <h2 className="text-3xl font-medium leading-tight tracking-tight sm:text-4xl xl:text-5xl">
                       Welcome back,{" "}
-                      <span className="text-teal-300">
+                      <span className="text-[var(--gold-bright)]">
                         {profile.name.split(" ")[0] || "Member"}.
                       </span>
                     </h2>
@@ -479,7 +670,7 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => navigateTo("My Membership")}
-                        className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-[#102b46] transition-transform hover:-translate-y-0.5"
+                        className="inline-flex items-center gap-2 rounded-xl bg-[var(--gold)] px-4 py-3 text-sm font-semibold text-black transition-transform hover:-translate-y-0.5"
                       >
                         View membership <ArrowRight size={16} />
                       </button>
@@ -526,7 +717,7 @@ export default function DashboardPage() {
                       value: "Aug 2026",
                       detail: "Demo account",
                       icon: UsersRound,
-                      color: "text-teal-600 bg-teal-500/10",
+                      color: "text-[var(--gold)] bg-[var(--gold)]/10",
                     },
                   ].map((item) => {
                     const Icon = item.icon;
@@ -571,7 +762,7 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => navigateTo("Payments")}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-teal-600 hover:underline"
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--gold)] hover:underline"
                       >
                         View all <ArrowRight size={13} />
                       </button>
@@ -584,7 +775,7 @@ export default function DashboardPage() {
                         >
                           <div className="flex min-w-0 items-center gap-3">
                             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--surface)]">
-                              <ArrowDownLeft size={18} className="text-teal-600" />
+                              <ArrowDownLeft size={18} className="text-[var(--gold)]" />
                             </span>
                             <div className="min-w-0">
                               <p className="truncate text-sm font-medium">
@@ -619,17 +810,17 @@ export default function DashboardPage() {
                           Your current plan
                         </p>
                       </div>
-                      <span className="rounded-lg bg-teal-500/10 p-2 text-teal-600">
+                      <span className="rounded-lg bg-[var(--gold)]/10 p-2 text-[var(--gold)]">
                         <Zap size={18} />
                       </span>
                     </div>
-                    <div className="mt-5 rounded-2xl bg-gradient-to-br from-[#102b46] to-[#145c62] p-5 text-white">
+                    <div className="mt-5 rounded-2xl bg-gradient-to-br from-[var(--dark-panel)] to-[var(--dark-panel-alt)] p-5 text-white">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-xs text-white/65">MEMBRIX MEMBERSHIP</p>
                           <p className="mt-2 text-2xl font-semibold">Premium</p>
                         </div>
-                        <ShieldCheck size={25} className="text-teal-300" />
+                        <ShieldCheck size={25} className="text-[var(--gold-bright)]" />
                       </div>
                       <div className="mt-9 flex items-end justify-between gap-3">
                         <div>
@@ -656,6 +847,14 @@ export default function DashboardPage() {
                     >
                       Membership details <ArrowRight size={15} />
                     </button>
+                 <button
+  type="button"
+  onClick={() => setCertificateOpen(true)}
+  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--gold)] px-4 py-3 text-sm font-semibold text-black transition-opacity hover:opacity-90"
+>
+  <FileBadge size={16} />
+  View Membership Certificate
+</button>
                   </div>
                 </section>
 
@@ -664,7 +863,7 @@ export default function DashboardPage() {
                   className="rounded-2xl border border-[var(--border)] p-5 sm:p-6"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/10 text-teal-600">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--gold)]/10 text-[var(--gold)]">
                       <CheckCircle2 size={19} />
                     </span>
                     <div>
@@ -682,7 +881,7 @@ export default function DashboardPage() {
                     </button>
                   </div>
                   <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-[var(--surface)]">
-                    <div className="h-full w-4/5 rounded-full bg-teal-600" />
+                    <div className="h-full w-4/5 rounded-full bg-[var(--gold)]" />
                   </div>
                   <p className="mt-2 text-xs text-[var(--muted-foreground)]">
                     Profile checklist · Demo progress 80%
@@ -701,7 +900,7 @@ export default function DashboardPage() {
 
                 <div className="overflow-hidden rounded-2xl border border-[var(--border)]">
                   <div className="flex flex-wrap items-center gap-4 border-b border-[var(--border)] p-5 sm:p-7">
-                    <span className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-600 text-lg font-semibold text-white">
+                    <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--gold)] text-lg font-semibold text-white">
                       {profile.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}
                     </span>
                     <div className="min-w-0 flex-1">
@@ -709,7 +908,7 @@ export default function DashboardPage() {
                       <p className="mt-1 break-all text-sm text-[var(--muted-foreground)]">
                         {profile.email}
                       </p>
-                      <p className="mt-2 text-xs text-teal-600">Membrix member</p>
+                      <p className="mt-2 text-xs text-[var(--gold)]">Membrix member</p>
                     </div>
                     <button
                       type="button"
@@ -750,7 +949,7 @@ export default function DashboardPage() {
                           readOnly={!editingProfile}
                           required={field === "name" || field === "email"}
                           onChange={(event) => updateProfile(field, event.target.value)}
-                          className={`w-full rounded-xl border border-[var(--border)] px-3.5 py-3 text-sm outline-none transition-colors placeholder:text-[var(--muted-foreground)] focus:border-teal-600 ${
+                          className={`w-full rounded-xl border border-[var(--border)] px-3.5 py-3 text-sm outline-none transition-colors placeholder:text-[var(--muted-foreground)] focus:border-[var(--gold)] ${
                             editingProfile
                               ? "bg-[var(--background)]"
                               : "bg-[var(--surface)]"
@@ -768,7 +967,7 @@ export default function DashboardPage() {
                         value={profile.bio}
                         readOnly={!editingProfile}
                         onChange={(event) => updateProfile("bio", event.target.value)}
-                        className={`w-full resize-y rounded-xl border border-[var(--border)] px-3.5 py-3 text-sm leading-6 outline-none transition-colors focus:border-teal-600 ${
+                        className={`w-full resize-y rounded-xl border border-[var(--border)] px-3.5 py-3 text-sm leading-6 outline-none transition-colors focus:border-[var(--gold)] ${
                           editingProfile
                             ? "bg-[var(--background)]"
                             : "bg-[var(--surface)]"
@@ -786,11 +985,22 @@ export default function DashboardPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            setProfile(initialProfile);
-                            setEditingProfile(false);
-                            showNotice("Demo profile changes discarded.");
-                          }}
+onClick={() => {
+  setProfile(() => {
+    try {
+      const stored = localStorage.getItem("membrix-demo-profile");
+      return stored
+        ? { ...initialProfile, ...JSON.parse(stored) }
+        : initialProfile;
+    } catch {
+      return initialProfile;
+    }
+  });
+  setEditingProfile(false);
+  setSaved(false);
+  showNotice("Unsaved profile changes discarded.");
+}}
+
                           className="rounded-xl border border-[var(--border)] px-5 py-3 text-sm font-medium"
                         >
                           Discard
@@ -806,7 +1016,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="flex items-start gap-3 rounded-2xl border border-[var(--border)] p-5">
-                  <ShieldCheck size={20} className="mt-0.5 shrink-0 text-teal-600" />
+                  <ShieldCheck size={20} className="mt-0.5 shrink-0 text-[var(--gold)]" />
                   <div>
                     <h3 className="text-sm font-semibold">Your information</h3>
                     <p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">
@@ -818,117 +1028,282 @@ export default function DashboardPage() {
               </section>
             )}
 
-            {activeSection === "My Membership" && (
-              <section data-dashboard-reveal className="mx-auto max-w-5xl space-y-6">
-                <p className="text-sm text-[var(--muted-foreground)]">
-                  Review your membership plan, included benefits and renewal information.
-                </p>
+      {activeSection === "My Membership" && (
+  <section
+    data-dashboard-reveal
+    className="mx-auto max-w-5xl space-y-6"
+  >
+    <div>
+      <h2 className="text-xl font-semibold">My Membership</h2>
+      <p className="mt-2 text-sm text-[var(--muted-foreground)]">
+        Your membership information from your Membrix account.
+      </p>
+    </div>
 
-                <div className="relative overflow-hidden rounded-3xl bg-[#102b46] p-6 text-white sm:p-9">
-                  <div className="pointer-events-none absolute -right-10 -top-16 h-64 w-64 rounded-full border border-white/10" />
-                  <div className="relative z-10 flex flex-wrap items-start justify-between gap-5">
-                    <div>
-                      <span className="inline-flex items-center gap-2 rounded-full bg-emerald-400/15 px-3 py-1.5 text-xs text-emerald-200">
-                        <CheckCircle2 size={14} /> Active · Demo status
-                      </span>
-                      <p className="mt-6 text-xs uppercase tracking-[0.2em] text-white/60">
-                        Current plan
-                      </p>
-                      <h2 className="mt-2 text-3xl font-semibold sm:text-4xl">
-                        Premium
-                      </h2>
-                      <p className="mt-3 max-w-lg text-sm leading-6 text-white/70">
-                        A sample membership overview for your Membrix account.
-                      </p>
-                    </div>
-                    <div className="min-w-36 rounded-2xl border border-white/15 bg-white/5 p-4">
-                      <p className="text-xs text-white/60">Sample plan price</p>
-                      <p className="mt-2 text-3xl font-semibold">$149</p>
-                      <p className="mt-1 text-xs text-white/60">per year · demo</p>
-                    </div>
+    {membershipLoading ? (
+      <div className="rounded-2xl border border-[var(--border)] p-8 text-center">
+        <p className="text-sm text-[var(--muted-foreground)]">
+          Loading your membership...
+        </p>
+      </div>
+    ) : membershipError ? (
+      <div
+        role="alert"
+        className="rounded-2xl border border-red-500/30 p-6"
+      >
+        <h3 className="font-semibold">Unable to load membership</h3>
+        <p className="mt-2 text-sm text-[var(--muted-foreground)]">
+          {membershipError}
+        </p>
+      </div>
+    ) : memberships.length === 0 ? (
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-8 text-center sm:p-12">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--gold)]/10 text-[var(--gold)]">
+          <UsersRound size={26} />
+        </div>
+
+        <h3 className="mt-5 text-xl font-semibold">
+          No membership yet
+        </h3>
+
+        <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[var(--muted-foreground)]">
+          Your account does not have a membership record yet.
+          Explore the available plans to get started.
+        </p>
+
+        <Link
+          href="/membership"
+          className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--gold)] px-5 py-3 text-sm font-semibold text-black transition-opacity hover:opacity-90"
+        >
+          Explore membership plans
+          <ArrowRight size={17} />
+        </Link>
+      </div>
+    ) : (
+      <>
+        <div className="space-y-5">
+          {memberships.map((membership) => {
+            const plan = membership.plan;
+
+            const statusStyles: Record<
+              UserMembership["status"],
+              string
+            > = {
+              active:
+                "bg-emerald-400/15 text-emerald-600 dark:text-emerald-300",
+              pending:
+                "bg-amber-400/15 text-amber-700 dark:text-amber-300",
+              expired:
+                "bg-slate-400/15 text-slate-600 dark:text-slate-300",
+              cancelled:
+                "bg-red-400/15 text-red-600 dark:text-red-300",
+            };
+
+            const formatDate = (value: string | null) => {
+              if (!value) return "—";
+
+              const date = new Date(value);
+
+              if (Number.isNaN(date.getTime())) return "—";
+
+              return date.toLocaleDateString("en-BD", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              });
+            };
+
+            const statusLabel =
+              membership.status.charAt(0).toUpperCase() +
+              membership.status.slice(1);
+
+            return (
+              <article
+                key={membership.membershipId}
+                className="relative overflow-hidden rounded-3xl bg-[var(--dark-panel)] p-6 text-white sm:p-9"
+              >
+                <div className="pointer-events-none absolute -right-10 -top-16 h-64 w-64 rounded-full border border-white/10" />
+
+                <div className="relative z-10 flex flex-wrap items-start justify-between gap-6">
+                  <div className="min-w-0">
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${statusStyles[membership.status]}`}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                      {statusLabel}
+                    </span>
+
+                    <p className="mt-6 text-xs uppercase tracking-[0.2em] text-white/60">
+                      Membership plan
+                    </p>
+
+                    <h3 className="mt-2 break-words text-3xl font-semibold sm:text-4xl">
+                      {plan?.name ?? "Plan information unavailable"}
+                    </h3>
+
+                    <p className="mt-3 max-w-lg text-sm leading-6 text-white/70">
+                      {plan?.billingType === "one_time"
+                        ? "One-time membership"
+                        : plan
+                          ? "Yearly membership"
+                          : "Plan details could not be loaded."}
+                    </p>
                   </div>
-                  <div className="relative z-10 mt-8 grid gap-4 border-t border-white/15 pt-5 sm:grid-cols-3">
-                    <div>
-                      <p className="text-xs text-white/55">Member since</p>
-                      <p className="mt-1.5 text-sm font-medium">August 12, 2026</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-white/55">Next renewal</p>
-                      <p className="mt-1.5 text-sm font-medium">November 12, 2026</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-white/55">Membership ID</p>
-                      <p className="mt-1.5 text-sm font-medium">MBX-••••-2048</p>
-                    </div>
+
+                  <div className="min-w-36 rounded-2xl border border-white/15 bg-white/5 p-4">
+                    <p className="text-xs text-white/60">
+                      Plan price
+                    </p>
+                    <p className="mt-2 text-3xl font-semibold">
+                      {plan ? money(plan.price) : "—"}
+                    </p>
+                    <p className="mt-1 text-xs text-white/60">
+                      {plan?.billingType === "one_time"
+                        ? "One-time"
+                        : plan
+                          ? "Per year"
+                          : "Unavailable"}
+                    </p>
                   </div>
                 </div>
 
-                <div className="grid gap-6 lg:grid-cols-2">
-                  <div className="rounded-2xl border border-[var(--border)] p-5 sm:p-6">
-                    <h3 className="text-sm font-semibold">Plan benefits</h3>
-                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                      Example benefits for the Premium plan
+                <div className="relative z-10 mt-8 grid gap-5 border-t border-white/15 pt-5 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-white/55">
+                      Member since
                     </p>
-                    <ul className="mt-5 space-y-4">
-                      {[
-                        "Access to member community",
-                        "Member-only events and updates",
-                        "Priority community support",
-                        "Membership activity history",
-                      ].map((benefit) => (
-                        <li key={benefit} className="flex items-center gap-3 text-sm">
-                          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-500/10 text-teal-600">
-                            <Check size={14} />
-                          </span>
-                          {benefit}
-                        </li>
-                      ))}
-                    </ul>
+                    <p className="mt-1.5 text-sm font-medium">
+                      {formatDate(membership.startDate)}
+                    </p>
                   </div>
-                  <div className="rounded-2xl border border-[var(--border)] p-5 sm:p-6">
-                    <h3 className="text-sm font-semibold">Membership actions</h3>
-                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                      Frontend preview actions
+
+                  <div>
+                    <p className="text-xs text-white/55">
+                      Membership expiry
                     </p>
-                    <div className="mt-5 space-y-3">
-                      <button
-                        type="button"
-                        onClick={() => navigateTo("Payments")}
-                        className="flex w-full items-center justify-between rounded-xl border border-[var(--border)] p-4 text-left transition-colors hover:bg-[var(--surface)]"
-                      >
-                        <span className="flex items-center gap-3">
-                          <CreditCard size={18} className="text-teal-600" />
-                          <span>
-                            <span className="block text-sm font-medium">Payment history</span>
-                            <span className="mt-1 block text-xs text-[var(--muted-foreground)]">
-                              View sample transactions
-                            </span>
-                          </span>
-                        </span>
-                        <ArrowRight size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => showNotice("Renewal management will be connected to the backend later.")}
-                        className="flex w-full items-center justify-between rounded-xl border border-[var(--border)] p-4 text-left transition-colors hover:bg-[var(--surface)]"
-                      >
-                        <span className="flex items-center gap-3">
-                          <Activity size={18} className="text-teal-600" />
-                          <span>
-                            <span className="block text-sm font-medium">Renewal information</span>
-                            <span className="mt-1 block text-xs text-[var(--muted-foreground)]">
-                              Review your sample renewal date
-                            </span>
-                          </span>
-                        </span>
-                        <ArrowRight size={16} />
-                      </button>
-                    </div>
+                    <p className="mt-1.5 text-sm font-medium">
+                      {membership.endDate
+                        ? formatDate(membership.endDate)
+                        : plan?.billingType === "one_time"
+                          ? "No expiry"
+                          : membership.status === "pending"
+                            ? "Not started"
+                            : "Not set"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-white/55">
+                      Membership ID
+                    </p>
+                    <p className="mt-1.5 break-all text-sm font-medium">
+                      {membership.membershipId}
+                    </p>
                   </div>
                 </div>
-              </section>
-            )}
+              </article>
+            );
+          })}
+        </div>
 
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-[var(--border)] p-5 sm:p-6">
+            <h3 className="text-sm font-semibold">Plan benefits</h3>
+
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              Benefits from your recorded membership plan.
+            </p>
+
+            <ul className="mt-5 space-y-4">
+              {(
+                memberships.find((item) => item.status === "active")
+                  ?.plan?.features ??
+                memberships[0]?.plan?.features ??
+                []
+              ).length > 0 ? (
+                (
+                  memberships.find((item) => item.status === "active")
+                    ?.plan?.features ??
+                  memberships[0]?.plan?.features ??
+                  []
+                ).map((benefit) => (
+                  <li
+                    key={benefit}
+                    className="flex items-start gap-3 text-sm"
+                  >
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--gold)]/10 text-[var(--gold)]">
+                      <Check size={14} />
+                    </span>
+                    <span>{benefit}</span>
+                  </li>
+                ))
+              ) : (
+                <li className="text-sm text-[var(--muted-foreground)]">
+                  No plan benefits are available.
+                </li>
+              )}
+            </ul>
+          </div>
+
+          <div className="rounded-2xl border border-[var(--border)] p-5 sm:p-6">
+            <h3 className="text-sm font-semibold">
+              Membership actions
+            </h3>
+
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              Manage your membership information.
+            </p>
+
+            <div className="mt-5 space-y-3">
+              <button
+                type="button"
+                onClick={() => navigateTo("Payments")}
+                className="flex w-full items-center justify-between rounded-xl border border-[var(--border)] p-4 text-left transition-colors hover:bg-[var(--surface)]"
+              >
+                <span className="flex items-center gap-3">
+                  <CreditCard
+                    size={18}
+                    className="text-[var(--gold)]"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium">
+                      Payment history
+                    </span>
+                    <span className="mt-1 block text-xs text-[var(--muted-foreground)]">
+                      View your recorded payments
+                    </span>
+                  </span>
+                </span>
+                <ArrowRight size={16} />
+              </button>
+
+              <Link
+                href="/membership"
+                className="flex w-full items-center justify-between rounded-xl border border-[var(--border)] p-4 text-left transition-colors hover:bg-[var(--surface)]"
+              >
+                <span className="flex items-center gap-3">
+                  <Activity
+                    size={18}
+                    className="text-[var(--gold)]"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium">
+                      Membership plans
+                    </span>
+                    <span className="mt-1 block text-xs text-[var(--muted-foreground)]">
+                      Review the available plans
+                    </span>
+                  </span>
+                </span>
+                <ArrowRight size={16} />
+              </Link>
+            </div>
+          </div>
+        </div>
+      </>
+    )}
+  </section>
+)}
             {activeSection === "Payments" && (
               <section data-dashboard-reveal className="space-y-6">
                 <div className="flex flex-wrap items-end justify-between gap-4">
@@ -940,33 +1315,52 @@ export default function DashboardPage() {
                       Demo records only · Not connected to a payment gateway
                     </p>
                   </div>
-                  <div className="relative w-full sm:w-72">
-                    <Search
-                      size={16}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]"
-                    />
-                    <input
-                      value={searchQuery}
-                      onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder="Search transactions..."
-                      aria-label="Search transactions"
-                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] py-2.5 pl-9 pr-3 text-sm outline-none focus:border-teal-600"
-                    />
-                  </div>
+<div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+  <div className="relative w-full sm:w-72">
+    <Search
+      size={16}
+      className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]"
+    />
+    <input
+      value={searchQuery}
+      onChange={(event) => setSearchQuery(event.target.value)}
+      placeholder="Search transactions..."
+      aria-label="Search transactions"
+      className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] py-2.5 pl-9 pr-3 text-sm outline-none focus:border-[var(--gold)]"
+    />
+  </div>
+
+  <select
+    value={paymentStatusFilter}
+    onChange={(event) =>
+      setPaymentStatusFilter(
+        event.target.value as "All" | PaymentStatus
+      )
+    }
+    aria-label="Filter payments by status"
+    className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm outline-none focus:border-[var(--gold)] sm:w-40"
+  >
+    <option value="All">All statuses</option>
+    <option value="Completed">Completed</option>
+    <option value="Pending">Pending</option>
+    <option value="Failed">Failed</option>
+  </select>
+</div>
+
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-3">
                   {[
-                    { label: "Total paid", value: money(447), icon: ArrowUpRight },
-                    { label: "Completed", value: "3 transactions", icon: CheckCircle2 },
-                    { label: "Pending", value: money(35), icon: Activity },
+                    { label: "Total paid", value: money(totalPaid), icon: ArrowUpRight },
+{ label: "Completed", value: `${completedCount} transactions`, icon: CheckCircle2 },
+{ label: "Pending", value: money(pendingAmount), icon: Activity },
                   ].map((item) => {
                     const Icon = item.icon;
                     return (
                       <div key={item.label} className="rounded-2xl border border-[var(--border)] p-5">
                         <div className="flex items-center justify-between">
                           <p className="text-xs text-[var(--muted-foreground)]">{item.label}</p>
-                          <Icon size={17} className="text-teal-600" />
+                          <Icon size={17} className="text-[var(--gold)]" />
                         </div>
                         <p className="mt-3 text-2xl font-semibold">{item.value}</p>
                       </div>
@@ -1027,18 +1421,47 @@ export default function DashboardPage() {
                                 aria-label={`View demo receipt for ${payment.id}`}
                                 className="rounded-lg border border-[var(--border)] p-2 transition-colors hover:bg-[var(--background)]"
                               >
-                                <Download size={15} />
+                              <span className="flex items-center gap-2">
+  <Download size={15} />
+  <span className="text-xs font-medium">Demo receipt</span>
+</span>
                               </button>
                             </td>
                           </tr>
                         ))}
-                        {filteredPayments.length === 0 && (
-                          <tr>
-                            <td colSpan={6} className="px-5 py-12 text-center text-sm text-[var(--muted-foreground)]">
-                              No transactions match “{searchQuery}”.
-                            </td>
-                          </tr>
-                        )}
+                       {filteredPayments.length === 0 && (
+  <tr>
+    <td
+      colSpan={6}
+      className="px-5 py-12 text-center"
+    >
+      <div className="mx-auto flex max-w-sm flex-col items-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--surface)] text-[var(--muted-foreground)]">
+          <Search size={20} />
+        </span>
+
+        <p className="mt-3 text-sm font-semibold">
+          No transactions found
+        </p>
+
+        <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+          Try a different search term or select another payment status.
+        </p>
+
+        <button
+          type="button"
+          onClick={() => {
+            setSearchQuery("");
+            setPaymentStatusFilter("All");
+          }}
+          className="mt-4 rounded-xl border border-[var(--border)] px-4 py-2 text-xs font-semibold transition-colors hover:bg-[var(--surface)]"
+        >
+          Clear filters
+        </button>
+      </div>
+    </td>
+  </tr>
+)}
                       </tbody>
                     </table>
                   </div>
@@ -1138,7 +1561,7 @@ export default function DashboardPage() {
                           showNotice(`${item.title} ${!item.checked ? "enabled" : "disabled"}.`);
                         }}
                         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-                          item.checked ? "bg-teal-600" : "bg-[var(--border)]"
+                          item.checked ? "bg-[var(--gold)]" : "bg-[var(--border)]"
                         }`}
                       >
                         <span
@@ -1164,7 +1587,7 @@ export default function DashboardPage() {
                     className="flex w-full items-center justify-between gap-4 border-b border-[var(--border)] p-5 text-left transition-colors hover:bg-[var(--surface)] sm:px-6"
                   >
                     <span className="flex items-center gap-3">
-                      <ShieldCheck size={19} className="text-teal-600" />
+                      <ShieldCheck size={19} className="text-[var(--gold)]" />
                       <span>
                         <span className="block text-sm font-medium">Password & security</span>
                         <span className="mt-1 block text-xs text-[var(--muted-foreground)]">
@@ -1176,15 +1599,18 @@ export default function DashboardPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => showNotice("Account deletion is unavailable in this frontend demo.")}
+                    onClick={handleLogout}
+disabled={loggingOut}
                     className="flex w-full items-center justify-between gap-4 p-5 text-left transition-colors hover:bg-red-500/5 sm:px-6"
                   >
                     <span className="flex items-center gap-3">
                       <LogOut size={19} className="text-red-500" />
                       <span>
-                        <span className="block text-sm font-medium">Account actions</span>
+                        <span className="block text-sm font-medium">
+  {loggingOut ? "Signing out..." : "Sign out"}
+</span>
                         <span className="mt-1 block text-xs text-[var(--muted-foreground)]">
-                          Sensitive actions require backend verification
+                          Sign out of your Membrix account
                         </span>
                       </span>
                     </span>
@@ -1211,6 +1637,139 @@ export default function DashboardPage() {
               </div>
             </footer>
           </div>
+{certificateOpen && (
+  <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
+    <section
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="membership-certificate-title"
+      className="my-auto w-full max-w-4xl overflow-hidden rounded-2xl bg-[var(--dark-panel)] text-[var(--dark-text)] shadow-2xl"
+    >
+      <div className="bg-[var(--dark-panel)] px-5 py-4 text-white sm:px-8">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold tracking-[0.3em] text-[var(--gold-bright)]">
+              MEMBRIX
+            </p>
+            <p className="mt-1 text-xs text-white/60">
+              Member workspace · Certificate preview
+            </p>
+          </div>
+          <ShieldCheck className="h-8 w-8 text-[var(--gold-bright)]" />
+        </div>
+      </div>
+
+      <div className="bg-[var(--surface)] p-3 text-[var(--foreground)] sm:p-6">
+        <div className="relative border-2 border-[var(--gold)] p-5 sm:p-9">
+          <div className="pointer-events-none absolute inset-2 border border-[var(--gold)]/20" />
+
+          <div className="relative text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border-2 border-[var(--gold)] text-[var(--dark-text)]">
+              <FileBadge size={25} />
+            </div>
+
+            <p className="mt-4 text-xs font-bold tracking-[0.35em] text-[var(--gold)]">
+              MEMBRIX MEMBERSHIP
+            </p>
+
+            <h2
+              id="membership-certificate-title"
+              className="mt-3 text-2xl font-serif font-bold tracking-wide text-[var(--dark-text)] sm:text-4xl"
+            >
+              Certificate of Membership
+            </h2>
+
+            <div className="mx-auto mt-4 h-1 w-20 rounded-full bg-[var(--gold)]" />
+
+            <p className="mt-5 text-sm text-[var(--dark-muted)]">
+              This certificate is presented to
+            </p>
+
+            <h3 className="mt-2 break-words text-2xl font-semibold text-[var(--dark-text)] sm:text-3xl">
+              {profile.name || "Member Name"}
+            </h3>
+
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[var(--dark-muted)]">
+              In recognition of their membership and participation in the Membrix community.
+            </p>
+
+            <div className="mt-7 grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
+              <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
+                <p className="text-[10px] font-bold tracking-wider text-[var(--dark-muted)]">
+                  MEMBERSHIP ID
+                </p>
+                <p className="mt-1 text-sm font-semibold text-[var(--dark-text)]">
+                  MBX-DEMO-2048
+                </p>
+              </div>
+
+              <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
+                <p className="text-[10px] font-bold tracking-wider text-[var(--dark-muted)]">
+                  MEMBERSHIP TYPE
+                </p>
+                <p className="mt-1 text-sm font-semibold text-[var(--dark-text)]">
+                  Premium · Demo
+                </p>
+              </div>
+
+              <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
+                <p className="text-[10px] font-bold tracking-wider text-[var(--dark-muted)]">
+                  CERTIFICATE STATUS
+                </p>
+                <p className="mt-1 text-sm font-semibold text-[var(--gold)]">
+                  Sample Preview
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-7 flex flex-col items-center justify-between gap-4 border-t border-[var(--border)] pt-5 sm:flex-row">
+              <div className="text-center sm:text-left">
+                <p className="text-xs text-[var(--dark-muted)]">Certificate reference</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--dark-text)]">
+                  MX-DEMO-001
+                </p>
+              </div>
+
+              <div className="text-center">
+                <div className="mx-auto w-36 border-b border-[var(--border)] pb-2 font-serif italic text-[var(--dark-text)]">
+                  Membrix
+                </div>
+                <p className="mt-2 text-xs text-[var(--dark-muted)]">
+                  Authorized signature · Demo
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
+          <p className="text-center text-xs leading-5 text-[var(--dark-muted)] sm:text-left">
+            Demo only — not an official or verified certificate.
+          </p>
+
+          <div className="flex flex-wrap justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-2 rounded-xl bg-[var(--gold)] px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
+            >
+              <Download size={16} />
+              Print / Save PDF
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCertificateOpen(false)}
+              className="rounded-xl bg-[var(--dark-panel)] px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+)}
         </main>
       </div>
     </div>

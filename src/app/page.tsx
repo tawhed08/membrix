@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -11,6 +10,8 @@ import {
   Check,
   Crown,
   Gem,
+  LayoutDashboard,
+  LogOut,
   Menu,
   Moon,
   ShieldCheck,
@@ -23,6 +24,16 @@ import {
 
 type Theme = "dark" | "light";
 
+type HomeAuthUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: "member" | "admin";
+};
+
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 const themeListeners = new Set<() => void>();
 
 function subscribeTheme(callback: () => void) {
@@ -32,7 +43,10 @@ function subscribeTheme(callback: () => void) {
 
 function getThemeSnapshot(): Theme {
   if (typeof document === "undefined") return "light";
-  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+
+  return document.documentElement.dataset.theme === "dark"
+    ? "dark"
+    : "light";
 }
 
 function getServerThemeSnapshot(): Theme {
@@ -50,12 +64,11 @@ function applyTheme(nextTheme: Theme) {
   try {
     localStorage.setItem("membrix-theme", nextTheme);
   } catch {
-    // The theme still works when localStorage is unavailable.
+    // Theme switching still works when browser storage is unavailable.
   }
 
   themeListeners.forEach((listener) => listener());
 
-  // Keep the theme toggle synchronized across pages.
   window.dispatchEvent(new Event("membrix-theme-change"));
 }
 
@@ -160,12 +173,88 @@ export default function Home() {
   );
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [authUser, setAuthUser] = useState<HomeAuthUser | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [authNotice, setAuthNotice] = useState("");
+
   const homeRef = useRef<HTMLElement>(null);
 
+  // Load the authenticated user from the backend.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAuthUser() {
+      try {
+        const response = await fetch(`${API_URL}/api/auth/me`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          if (!cancelled) {
+            setAuthUser(null);
+          }
+          return;
+        }
+
+        const payload: unknown = await response.json();
+
+        if (typeof payload !== "object" || payload === null) {
+          return;
+        }
+
+        const data = payload as Record<string, unknown>;
+
+        const nested =
+          typeof data.data === "object" && data.data !== null
+            ? (data.data as Record<string, unknown>)
+            : null;
+
+        const candidate = data.user ?? nested?.user;
+
+        if (typeof candidate !== "object" || candidate === null) {
+          return;
+        }
+
+        const user = candidate as Record<string, unknown>;
+        const userId = user.id ?? user._id;
+
+        if (!userId || typeof user.email !== "string") {
+          return;
+        }
+
+        if (!cancelled) {
+          setAuthUser({
+            id: String(userId),
+            name:
+              typeof user.name === "string" && user.name.trim()
+                ? user.name.trim()
+                : user.email.split("@")[0],
+            email: user.email,
+            role: user.role === "admin" ? "admin" : "member",
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setAuthUser(null);
+        }
+      }
+    }
+
+    void loadAuthUser();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Main GSAP animations.
   useEffect(() => {
     gsap.registerPlugin(ScrollTrigger);
 
     const root = homeRef.current;
+
     if (!root) return;
 
     const reduceMotion = window.matchMedia(
@@ -190,7 +279,6 @@ export default function Home() {
         return;
       }
 
-      // Initial hero entrance.
       const intro = gsap.timeline({
         defaults: { ease: "power3.out" },
       });
@@ -242,7 +330,6 @@ export default function Home() {
           "-=0.75",
         );
 
-      // Reveal content as each section enters the viewport.
       gsap.utils
         .toArray<HTMLElement>(".editorial-reveal")
         .forEach((element) => {
@@ -263,7 +350,6 @@ export default function Home() {
           );
         });
 
-      // Animate cards in sequence.
       gsap.utils
         .toArray<HTMLElement>(".editorial-stagger")
         .forEach((group) => {
@@ -287,7 +373,6 @@ export default function Home() {
           );
         });
 
-      // Philosophy list animation.
       gsap.fromTo(
         ".editorial-value",
         { autoAlpha: 0, x: 22 },
@@ -305,7 +390,6 @@ export default function Home() {
         },
       );
 
-      // Decorative orbital motion.
       gsap.to(".hero-orbit", {
         rotation: 360,
         duration: 42,
@@ -322,7 +406,6 @@ export default function Home() {
         transformOrigin: "50% 50%",
       });
 
-      // Gentle floating motion for the decorative icons.
       gsap.to(".hero-float-one", {
         y: -10,
         duration: 2.6,
@@ -340,7 +423,6 @@ export default function Home() {
         delay: 0.4,
       });
 
-      // Subtle parallax on the hero visual while scrolling.
       gsap.to(".hero-artwork", {
         y: -35,
         ease: "none",
@@ -352,7 +434,6 @@ export default function Home() {
         },
       });
 
-      // CTA background glow movement.
       gsap.to(".cta-glow", {
         x: 45,
         y: -20,
@@ -375,6 +456,36 @@ export default function Home() {
   function closeMenu() {
     setMenuOpen(false);
   }
+
+  async function handleHomeLogout() {
+    if (loggingOut) return;
+
+    setLoggingOut(true);
+    setAuthNotice("");
+
+    try {
+      const response = await fetch(`${API_URL}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        setAuthNotice("Unable to sign out. Please try again.");
+        return;
+      }
+
+      setAuthUser(null);
+      setMenuOpen(false);
+    } catch {
+      setAuthNotice(
+        "The server could not complete sign out. Please check your connection.",
+      );
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
+  const firstName = authUser?.name.trim().split(/\s+/)[0] || "Profile";
 
   return (
     <main
@@ -440,20 +551,50 @@ export default function Home() {
               )}
             </button>
 
-            <a
-              href="/login"
-              className="button button-outline hidden sm:inline-flex"
-            >
-              Sign in
-            </a>
+            {authUser ? (
+              <>
+                <a
+                  href={authUser.role === "admin" ? "/admin" : "/dashboard"}
+                  className="button button-gold hidden items-center gap-2 sm:inline-flex"
+                  title={`${authUser.role === "admin" ? "Admin Dashboard" : "Dashboard"} for ${authUser.name}`}
+                >
+                  {authUser.role === "admin" ? (
+                    <ShieldCheck size={16} />
+                  ) : (
+                    <LayoutDashboard size={16} />
+                  )}
+                  <span className="max-w-28 truncate">{firstName}</span>
+                  <ArrowUpRight size={16} />
+                </a>
 
-            <a
-              href="/register"
-              className="button button-gold hidden sm:inline-flex"
-            >
-              Become a member
-              <ArrowUpRight size={16} />
-            </a>
+                <button
+                  type="button"
+                  onClick={() => void handleHomeLogout()}
+                  disabled={loggingOut}
+                  className="button button-outline hidden items-center gap-2 sm:inline-flex disabled:opacity-60"
+                >
+                  <LogOut size={15} />
+                  {loggingOut ? "Signing out..." : "Sign out"}
+                </button>
+              </>
+            ) : (
+              <>
+                <a
+                  href="/login"
+                  className="button button-outline hidden sm:inline-flex"
+                >
+                  Sign in
+                </a>
+
+                <a
+                  href="/register"
+                  className="button button-gold hidden items-center gap-2 sm:inline-flex"
+                >
+                  Become a member
+                  <ArrowUpRight size={16} />
+                </a>
+              </>
+            )}
 
             <button
               type="button"
@@ -466,6 +607,16 @@ export default function Home() {
             </button>
           </div>
         </div>
+
+        {authNotice && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="border-t border-red-500/20 bg-red-500/5 px-5 py-3 text-center text-sm text-red-600 dark:text-red-300"
+          >
+            {authNotice}
+          </div>
+        )}
 
         {menuOpen && (
           <nav className="border-t border-[var(--border)] bg-[var(--background)] px-5 py-5 sm:px-8 lg:hidden">
@@ -498,30 +649,64 @@ export default function Home() {
               >
                 Contact
               </a>
-              <a
-                href="/login"
-                className="button button-outline mt-2"
-                onClick={closeMenu}
-              >
-                Sign in
-              </a>
-              <a
-                href="/register"
-                className="button button-gold mt-2"
-                onClick={closeMenu}
-              >
-                Become a member <ArrowRight size={16} />
-              </a>
+
+              <div className="my-2 border-t border-[var(--border)]" />
+
+              {authUser ? (
+                <>
+                  <a
+                    href={authUser.role === "admin" ? "/admin" : "/dashboard"}
+                    className="button button-gold mt-2 justify-center"
+                    onClick={closeMenu}
+                  >
+                    {authUser.role === "admin" ? (
+                      <ShieldCheck size={16} />
+                    ) : (
+                      <LayoutDashboard size={16} />
+                    )}
+                    {authUser.role === "admin"
+                      ? "Admin Dashboard"
+                      : `${authUser.name} — Dashboard`}
+                    <ArrowRight size={16} />
+                  </a>
+
+                  <button
+                    type="button"
+                    className="button button-outline mt-2 justify-center"
+                    onClick={() => void handleHomeLogout()}
+                    disabled={loggingOut}
+                  >
+                    <LogOut size={15} />
+                    {loggingOut ? "Signing out..." : "Sign out"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <a
+                    href="/login"
+                    className="button button-outline mt-2 justify-center"
+                    onClick={closeMenu}
+                  >
+                    Sign in
+                  </a>
+
+                  <a
+                    href="/register"
+                    className="button button-gold mt-2 justify-center"
+                    onClick={closeMenu}
+                  >
+                    Become a member
+                    <ArrowRight size={16} />
+                  </a>
+                </>
+              )}
             </div>
           </nav>
         )}
       </header>
 
       {/* Hero */}
-      <section
-        id="home"
-        className="relative border-b border-[var(--border)]"
-      >
+      <section id="home" className="relative border-b border-[var(--border)]">
         <div className="pointer-events-none absolute right-[-180px] top-[-130px] h-[500px] w-[500px] rounded-full bg-[#c5a66b]/10 blur-[100px]" />
 
         <div className="relative mx-auto grid max-w-[1440px] items-center gap-12 px-5 pb-16 pt-16 sm:px-8 sm:pb-20 sm:pt-20 lg:grid-cols-[1.12fr_0.88fr] lg:gap-10 lg:px-12 lg:pb-24 lg:pt-24">
@@ -685,6 +870,7 @@ export default function Home() {
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
             The Membrix principles
           </p>
+
           <div className="flex items-center gap-3">
             <ShieldCheck
               size={18}
@@ -693,6 +879,7 @@ export default function Home() {
             />
             <span className="text-sm">Thoughtful organization</span>
           </div>
+
           <div className="flex items-center gap-3">
             <Users
               size={18}
@@ -701,6 +888,7 @@ export default function Home() {
             />
             <span className="text-sm">Meaningful connection</span>
           </div>
+
           <div className="flex items-center gap-3">
             <Gem
               size={18}
@@ -724,6 +912,7 @@ export default function Home() {
                 <span className="h-px w-8 bg-[#b89554]" />
                 The experience
               </p>
+
               <h2 className="max-w-[800px] text-4xl font-medium leading-[1.05] tracking-[-0.065em] sm:text-5xl lg:text-7xl">
                 Less friction.
                 <br />
@@ -732,6 +921,7 @@ export default function Home() {
                 </span>
               </h2>
             </div>
+
             <p className="max-w-[460px] text-sm leading-7 text-[var(--muted)] sm:text-base sm:leading-8 lg:pb-2">
               The best membership experience does more than keep
               things organized. It gives people and organizations
@@ -752,6 +942,7 @@ export default function Home() {
                     <span className="text-xs tracking-[0.15em] text-[var(--muted)]">
                       {benefit.number}
                     </span>
+
                     <span className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border)] transition-all duration-300 group-hover:border-[#b89554]/50 group-hover:bg-[#b89554]/10">
                       <Icon
                         size={20}
@@ -760,15 +951,19 @@ export default function Home() {
                       />
                     </span>
                   </div>
+
                   <span className="mb-3 text-[9px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
                     {benefit.detail}
                   </span>
+
                   <h3 className="text-2xl font-medium tracking-[-0.045em] sm:text-[27px]">
                     {benefit.title}
                   </h3>
+
                   <p className="mt-4 max-w-[340px] text-sm leading-7 text-[var(--muted)]">
                     {benefit.description}
                   </p>
+
                   <span className="mt-auto flex justify-end pt-8 text-[var(--muted)] transition-all duration-300 group-hover:translate-x-1 group-hover:text-[#b89554]">
                     <ArrowUpRight size={20} strokeWidth={1.5} />
                   </span>
@@ -791,6 +986,7 @@ export default function Home() {
                 <span className="h-px w-8 bg-[#b89554]" />
                 Membership options
               </p>
+
               <h2 className="max-w-[850px] text-4xl font-medium leading-[1.05] tracking-[-0.065em] sm:text-5xl lg:text-7xl">
                 Find the right
                 <br />
@@ -799,6 +995,7 @@ export default function Home() {
                 </span>
               </h2>
             </div>
+
             <p className="max-w-[390px] text-sm leading-7 text-[var(--muted)] sm:text-base">
               Explore the membership options and find the level
               of access that suits your needs.
@@ -824,6 +1021,7 @@ export default function Home() {
                       Recommended option
                     </div>
                   )}
+
                   <div className="flex items-start justify-between">
                     <div>
                       <span className="text-[10px] tracking-[0.16em] text-[var(--muted)]">
@@ -833,15 +1031,18 @@ export default function Home() {
                         {plan.name}
                       </h3>
                     </div>
+
                     <Icon
                       size={25}
                       strokeWidth={1.4}
                       className="text-[#b89554] transition-transform duration-300 group-hover:-translate-y-1"
                     />
                   </div>
+
                   <p className="mt-4 min-h-[48px] text-sm leading-6 text-[var(--muted)]">
                     {plan.description}
                   </p>
+
                   <div className="mt-8 border-b border-[var(--border)] pb-7">
                     <span className="text-4xl font-medium tracking-[-0.06em] sm:text-5xl">
                       {plan.price}
@@ -850,9 +1051,11 @@ export default function Home() {
                       {plan.period}
                     </span>
                   </div>
+
                   <p className="mb-5 mt-7 text-[9px] font-semibold uppercase tracking-[0.19em] text-[var(--muted)]">
                     Included in your membership
                   </p>
+
                   <ul className="mb-9 space-y-4">
                     {plan.benefits.map((benefit) => (
                       <li
@@ -866,6 +1069,7 @@ export default function Home() {
                       </li>
                     ))}
                   </ul>
+
                   <a
                     href="/register"
                     className={`button mt-auto w-full ${
@@ -895,8 +1099,10 @@ export default function Home() {
         <div className="mx-auto grid max-w-[1440px] gap-14 px-5 sm:px-8 lg:grid-cols-[0.85fr_1.15fr] lg:gap-24 lg:px-12">
           <div className="editorial-reveal relative flex min-h-[340px] items-center justify-center overflow-hidden border border-[var(--border)] bg-[var(--surface)] p-8 sm:min-h-[450px]">
             <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(197,166,107,0.15),transparent_65%)]" />
+
             <div className="relative flex aspect-square w-full max-w-[290px] items-center justify-center rounded-full border border-[#b89554]/35">
               <div className="absolute inset-[12%] rounded-full border border-dashed border-[var(--border)]" />
+
               <div className="relative flex flex-col items-center">
                 <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#102b46] text-3xl font-semibold text-[#d6b878]">
                   m
@@ -908,13 +1114,16 @@ export default function Home() {
                   Built around belonging.
                 </span>
               </div>
+
               <span className="absolute right-[6%] top-[22%] flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--background)]">
                 <Sparkles size={17} className="text-[#b89554]" />
               </span>
+
               <span className="absolute bottom-[18%] left-[1%] flex h-10 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--background)]">
                 <Gem size={17} className="text-[#b89554]" />
               </span>
             </div>
+
             <span className="absolute bottom-5 left-5 text-[9px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)] sm:bottom-7 sm:left-7">
               A platform with purpose
             </span>
@@ -925,6 +1134,7 @@ export default function Home() {
               <span className="h-px w-8 bg-[#b89554]" />
               Our philosophy
             </p>
+
             <h2 className="text-4xl font-medium leading-[1.07] tracking-[-0.065em] sm:text-5xl lg:text-6xl">
               Technology should
               <br />
@@ -933,6 +1143,7 @@ export default function Home() {
                 human.
               </span>
             </h2>
+
             <p className="mt-7 max-w-[520px] text-sm leading-8 text-[var(--muted)] sm:text-base">
               Great membership experiences begin with people,
               not processes. Membrix is being designed to make
@@ -949,6 +1160,7 @@ export default function Home() {
                   <span className="pt-1 text-xs text-[#b89554]">
                     {value.number}
                   </span>
+
                   <div>
                     <h3 className="text-base font-medium tracking-tight">
                       {value.title}
@@ -978,12 +1190,14 @@ export default function Home() {
         className="relative overflow-hidden border-b border-[var(--border)] bg-[#102b46] text-white"
       >
         <div className="cta-glow pointer-events-none absolute -right-24 -top-32 h-[400px] w-[400px] rounded-full bg-[#c5a66b]/15 blur-[100px]" />
+
         <div className="relative mx-auto grid max-w-[1440px] gap-10 px-5 py-20 sm:px-8 sm:py-28 lg:grid-cols-[1fr_auto] lg:items-end lg:gap-16 lg:px-12 lg:py-32">
           <div className="editorial-reveal">
             <p className="mb-7 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/60 sm:text-xs">
               <span className="h-px w-8 bg-[#d6b878]" />
               Your next chapter
             </p>
+
             <h2 className="max-w-[850px] text-5xl font-medium leading-[0.99] tracking-[-0.075em] sm:text-6xl lg:text-8xl">
               Make belonging
               <br />
@@ -991,6 +1205,7 @@ export default function Home() {
                 mean more.
               </span>
             </h2>
+
             <p className="mt-7 max-w-[490px] text-sm leading-7 text-white/65 sm:text-base sm:leading-8">
               Discover a more considered way to manage memberships
               and bring your community closer together.
@@ -998,10 +1213,24 @@ export default function Home() {
           </div>
 
           <div className="editorial-reveal flex flex-col items-start gap-4 lg:items-end">
-            <a href="/register" className="button button-gold">
-              Become a member
+            <a
+              href={
+                authUser
+                  ? authUser.role === "admin"
+                    ? "/admin"
+                    : "/dashboard"
+                  : "/register"
+              }
+              className="button button-gold"
+            >
+              {authUser
+                ? authUser.role === "admin"
+                  ? "Admin Dashboard"
+                  : "Go to dashboard"
+                : "Become a member"}
               <ArrowRight size={17} />
             </a>
+
             <a
               href="/contact"
               className="inline-flex items-center gap-2 py-2 text-sm text-white/70 transition-colors hover:text-white"
@@ -1026,6 +1255,7 @@ export default function Home() {
                   membrix<span className="text-[#b89554]">.</span>
                 </span>
               </a>
+
               <p className="mt-4 max-w-[300px] text-sm leading-7 text-[var(--muted)]">
                 Membership, thoughtfully reimagined. Built around
                 people and better connections.
@@ -1036,14 +1266,24 @@ export default function Home() {
               <p className="mb-4 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
                 Explore
               </p>
+
               <div className="flex flex-col items-start gap-3 text-sm">
-                <a className="transition-colors hover:text-[#b89554]" href="#benefits">
+                <a
+                  className="transition-colors hover:text-[#b89554]"
+                  href="#benefits"
+                >
                   The experience
                 </a>
-                <a className="transition-colors hover:text-[#b89554]" href="#membership">
+                <a
+                  className="transition-colors hover:text-[#b89554]"
+                  href="#membership"
+                >
                   Membership
                 </a>
-                <a className="transition-colors hover:text-[#b89554]" href="/about">
+                <a
+                  className="transition-colors hover:text-[#b89554]"
+                  href="/about"
+                >
                   About us
                 </a>
               </div>
@@ -1051,18 +1291,57 @@ export default function Home() {
 
             <div>
               <p className="mb-4 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-                Get in touch
+                {authUser ? "Your account" : "Get in touch"}
               </p>
+
               <div className="flex flex-col items-start gap-3 text-sm">
-                <a className="transition-colors hover:text-[#b89554]" href="/contact">
+                <a
+                  className="transition-colors hover:text-[#b89554]"
+                  href="/contact"
+                >
                   Contact
                 </a>
-                <a className="transition-colors hover:text-[#b89554]" href="/login">
-                  Member sign in
-                </a>
-                <a className="transition-colors hover:text-[#b89554]" href="/register">
-                  Create an account
-                </a>
+
+                {authUser ? (
+                  <>
+                    <a
+                      className="transition-colors hover:text-[#b89554]"
+                      href={
+                        authUser.role === "admin"
+                          ? "/admin"
+                          : "/dashboard"
+                      }
+                    >
+                      {authUser.role === "admin"
+                        ? "Admin Dashboard"
+                        : "Member Dashboard"}
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleHomeLogout()}
+                      disabled={loggingOut}
+                      className="transition-colors hover:text-[#b89554] disabled:opacity-60"
+                    >
+                      {loggingOut ? "Signing out..." : "Sign out"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <a
+                      className="transition-colors hover:text-[#b89554]"
+                      href="/login"
+                    >
+                      Member sign in
+                    </a>
+                    <a
+                      className="transition-colors hover:text-[#b89554]"
+                      href="/register"
+                    >
+                      Create an account
+                    </a>
+                  </>
+                )}
               </div>
             </div>
           </div>

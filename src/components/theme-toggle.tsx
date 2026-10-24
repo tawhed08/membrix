@@ -18,9 +18,7 @@ function subscribe(callback: () => void) {
 }
 
 function getSnapshot(): Theme {
-  return document.documentElement.dataset.theme === "dark"
-    ? "dark"
-    : "light";
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 }
 
 function getServerSnapshot(): Theme {
@@ -34,7 +32,7 @@ function setTheme(theme: Theme) {
   try {
     localStorage.setItem("membrix-theme", theme);
   } catch {
-    // Theme changes still work if localStorage is unavailable.
+    // Theme still works when localStorage is unavailable.
   }
 
   window.dispatchEvent(new Event(THEME_EVENT));
@@ -49,10 +47,8 @@ export default function ThemeToggle() {
     getServerSnapshot,
   );
 
-  // The homepage already has its own theme toggle.
-  if (pathname === "/") {
-    return null;
-  }
+  // Homepage already has its own theme toggle.
+  if (pathname === "/") return null;
 
   const nextTheme: Theme = theme === "dark" ? "light" : "dark";
 

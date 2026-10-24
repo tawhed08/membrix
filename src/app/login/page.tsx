@@ -1,8 +1,8 @@
-
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -14,28 +14,132 @@ import {
   Sparkles,
 } from "lucide-react";
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+type LoginResponse = {
+  success?: boolean;
+  message?: string;
+  user?: {
+    id?: string;
+    name?: string;
+    email?: string;
+    role?: "member" | "admin";
+    isActive?: boolean;
+  };
+};
+
 export default function LoginPage() {
+  const router = useRouter();
+
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkExistingSession() {
+      try {
+        const response = await fetch(`${API_URL}/api/auth/me`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (!response.ok) return;
+
+        const data = (await response.json()) as LoginResponse;
+
+        if (data.success && data.user && !cancelled) {
+          router.replace(
+            data.user.role === "admin" ? "/admin" : "/dashboard",
+          );
+        }
+      } catch {
+        // Not authenticated, stay on login page
+      }
+    }
+
+    void checkExistingSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    // Backend authentication will be connected later.
+
+    if (loading) {
+      return;
+    }
+
+    setError("");
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_URL}/api/auth/login`, {
+        method: "POST",
+
+        // Required so the browser accepts the backend auth cookie.
+        credentials: "include",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+        }),
+      });
+
+      const data = (await response.json()) as LoginResponse;
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Login failed. Please check your details.",
+        );
+      }
+
+      // The backend sets an HttpOnly membrix_token cookie.
+      // Do not store the authentication token in localStorage.
+      setPassword("");
+router.replace(
+  data.user?.role === "admin" ? "/admin" : "/dashboard",
+);
+router.refresh();
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to connect to the server. Please try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
       <div className="grid min-h-screen lg:grid-cols-2">
+        {/* Left brand panel */}
         <section className="relative hidden overflow-hidden bg-[#102b46] p-12 text-white lg:flex lg:flex-col lg:justify-between xl:p-16">
           <div className="pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full border border-white/10" />
           <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full border border-white/10" />
           <div className="pointer-events-none absolute -bottom-32 -left-24 h-96 w-96 rounded-full bg-[#d6b878]/10 blur-3xl" />
 
-          <Link href="/" className="relative z-10 inline-flex w-fit items-center gap-3">
+          <Link
+            href="/"
+            className="relative z-10 inline-flex w-fit items-center gap-3"
+          >
             <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#d6b878]/40 bg-[#d6b878]/10 text-[#e6ca8b]">
               <Sparkles size={22} />
             </span>
+
             <span className="text-2xl font-semibold tracking-tight">
               Membrix<span className="text-[#d6b878]">.</span>
             </span>
@@ -70,15 +174,19 @@ export default function LoginPage() {
                   </span>
                 ))}
               </div>
-              <p className="text-sm text-white/60">A better way to belong.</p>
+
+              <p className="text-sm text-white/60">
+                A better way to belong.
+              </p>
             </div>
           </div>
 
           <p className="relative z-10 text-xs text-white/40">
-          © 2026 Membrix. All rights reserved.
+            © 2026 Membrix. All rights reserved.
           </p>
         </section>
 
+        {/* Login form */}
         <section className="flex min-h-screen flex-col px-5 py-6 sm:px-10 lg:px-14 xl:px-20">
           <header className="flex items-center justify-between">
             <Link
@@ -103,7 +211,7 @@ export default function LoginPage() {
             </div>
 
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-[#b99a5b]">
-              Member access
+              Secure account access
             </p>
 
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -115,19 +223,40 @@ export default function LoginPage() {
             </p>
 
             <form onSubmit={handleSubmit} className="mt-9 space-y-5">
+              {error && (
+                <p
+                  role="alert"
+                  aria-live="polite"
+                  className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600"
+                >
+                  {error}
+                </p>
+              )}
+
               <div>
-                <label htmlFor="email" className="mb-2 block text-sm font-medium">
+                <label
+                  htmlFor="email"
+                  className="mb-2 block text-sm font-medium"
+                >
                   Email address
                 </label>
+
                 <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 transition focus-within:border-[#b99a5b] focus-within:ring-2 focus-within:ring-[#d6b878]/15">
-                  <Mail size={18} className="shrink-0 text-[var(--muted)]" />
+                  <Mail
+                    size={18}
+                    className="shrink-0 text-[var(--muted)]"
+                  />
+
                   <input
                     id="email"
                     name="email"
                     type="email"
-                    autoComplete="email"
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     placeholder="you@example.com"
                     required
+                    maxLength={254}
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
@@ -137,9 +266,13 @@ export default function LoginPage() {
 
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <label htmlFor="password" className="text-sm font-medium">
+                  <label
+                    htmlFor="password"
+                    className="text-sm font-medium"
+                  >
                     Password
                   </label>
+
                   <Link
                     href="/forgot-password"
                     className="text-xs font-medium text-[#b99a5b] transition hover:underline"
@@ -149,7 +282,11 @@ export default function LoginPage() {
                 </div>
 
                 <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 transition focus-within:border-[#b99a5b] focus-within:ring-2 focus-within:ring-[#d6b878]/15">
-                  <LockKeyhole size={18} className="shrink-0 text-[var(--muted)]" />
+                  <LockKeyhole
+                    size={18}
+                    className="shrink-0 text-[var(--muted)]"
+                  />
+
                   <input
                     id="password"
                     name="password"
@@ -157,27 +294,44 @@ export default function LoginPage() {
                     autoComplete="current-password"
                     placeholder="Enter your password"
                     required
+                    minLength={1}
+                    maxLength={128}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
                   />
+
                   <button
                     type="button"
                     onClick={() => setShowPassword((current) => !current)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
+                    aria-pressed={showPassword}
                     className="shrink-0 rounded-md p-1 text-[var(--muted)] transition hover:text-[var(--foreground)]"
                   >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    {showPassword ? (
+                      <EyeOff size={18} />
+                    ) : (
+                      <Eye size={18} />
+                    )}
                   </button>
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#d6b878] px-5 text-sm font-semibold text-[#172b3d] shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-[#e6ca8b] hover:shadow-lg hover:shadow-[#d6b878]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b99a5b] focus-visible:ring-offset-2"
+                disabled={loading}
+                className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#d6b878] px-5 text-sm font-semibold text-[#172b3d] shadow-sm transition duration-200 hover:-translate-y-0.5 hover:bg-[#e6ca8b] hover:shadow-lg hover:shadow-[#d6b878]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b99a5b] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Sign in
-                <ArrowRight size={17} className="transition-transform group-hover:translate-x-1" />
+                {loading ? "Signing in..." : "Sign in"}
+
+                {!loading && (
+                  <ArrowRight
+                    size={17}
+                    className="transition-transform group-hover:translate-x-1"
+                  />
+                )}
               </button>
 
               <p className="text-center text-xs leading-6 text-[var(--muted)]">
@@ -200,7 +354,11 @@ export default function LoginPage() {
 
           <footer className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 pb-2 text-xs text-[var(--muted)]">
             <span>Made for membership communities</span>
-            <Link href="/contact" className="transition hover:text-[var(--foreground)]">
+
+            <Link
+              href="/contact"
+              className="transition hover:text-[var(--foreground)]"
+            >
               Need help?
             </Link>
           </footer>

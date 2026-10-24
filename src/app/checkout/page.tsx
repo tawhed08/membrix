@@ -12,14 +12,16 @@ import {
   Check,
   CheckCircle2,
   CreditCard,
-  FileText,
   LockKeyhole,
   ShieldCheck,
   Sparkles,
-  Upload,
   Wallet,
   X,
 } from "lucide-react";
+
+const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+).replace(/\/+$/, "");
 
 type PlanId = "essential" | "premium" | "lifetime";
 
@@ -120,9 +122,9 @@ function CheckoutContent() {
     useState<PaymentMethod>("bkash");
   const [transactionId, setTransactionId] = useState("");
   const [payerNumber, setPayerNumber] = useState("");
-  const [proofFile, setProofFile] = useState<File | null>(null);
   const [notice, setNotice] = useState("");
   const [noticeType, setNoticeType] = useState<"info" | "error">("info");
+const [isSubmitting, setIsSubmitting] = useState(false);
 
   const plan = plans[selectedPlan];
   const isManualPayment = paymentMethod !== "online";
@@ -151,53 +153,101 @@ function CheckoutContent() {
     return () => ctx.revert();
   }, []);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setNoticeType("info");
 
+    // Prevent duplicate submissions
+    if (isSubmitting) {
+      return;
+    }
+
+    // Validate transaction ID for manual payments
     if (isManualPayment && !transactionId.trim()) {
       setNoticeType("error");
       setNotice("Enter the transaction ID to continue.");
       return;
     }
 
-    setNotice(
-      isManualPayment
-        ? "Demo only: your payment details have not been submitted or saved. Manual payment verification will be available after the backend is connected."
-        : "Demo only: the online payment gateway is not connected yet. No payment has been initiated or charged.",
-    );
-  }
-
-  function handleFileChange(file: File | null) {
+    setIsSubmitting(true);
     setNotice("");
 
-    if (!file) {
-      setProofFile(null);
-      return;
-    }
+    try {
+      if (!isManualPayment) {
+        // Online gateway initiation via verified aamarPay backend route
+        const res = await fetch(`${API_URL}/api/payments/aamarpay/initiate`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            planSlug: selectedPlan,
+          }),
+        });
 
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "application/pdf",
-    ];
+        const data = await res.json();
 
-    if (!allowedTypes.includes(file.type)) {
+        if (res.status === 401) {
+          setNoticeType("error");
+          setNotice("Please sign in to your member account before continuing.");
+          return;
+        }
+
+        if (res.ok && data.payment_url) {
+          window.location.href = String(data.payment_url);
+          return;
+        }
+
+        setNoticeType("error");
+        setNotice(
+          data.message ||
+            "The online payment gateway is currently unavailable. Please select a manual payment method.",
+        );
+        return;
+      }
+
+      const payload = {
+        planSlug: selectedPlan,
+        method: paymentMethod,
+        transactionId: transactionId.trim(),
+        payerNumber: payerNumber.trim() || undefined,
+      };
+
+      const res = await fetch(`${API_URL}/api/payments/manual/submit`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+
+      if (res.status === 401) {
+        setNoticeType("error");
+        setNotice("Please sign in to your member account before submitting payment.");
+        return;
+      }
+
+      if (res.ok && data.success) {
+        setNoticeType("info");
+        setNotice(
+          `Payment submitted successfully (Reference: ${data.payment.transactionId}). Your membership is now pending admin review.`,
+        );
+        setTransactionId("");
+        setPayerNumber("");
+      } else {
+        setNoticeType("error");
+        setNotice(data.message ?? "Failed to submit payment.");
+      }
+    } catch {
       setNoticeType("error");
-      setNotice("Choose a JPG, PNG, WebP image or PDF file.");
-      setProofFile(null);
-      return;
+      setNotice("Network error while submitting payment. Please check your connection.");
+    } finally {
+      setIsSubmitting(false);
     }
-
-    if (file.size > 5 * 1024 * 1024) {
-      setNoticeType("error");
-      setNotice("The proof file must be 5 MB or smaller.");
-      setProofFile(null);
-      return;
-    }
-
-    setProofFile(file);
   }
 
   return (
@@ -439,61 +489,12 @@ function CheckoutContent() {
                     </label>
                   </div>
 
-                  <div>
-                    <span className="mb-2 block text-sm font-medium">
-                      Payment proof
-                      <span className="ml-1 text-xs font-normal text-[var(--muted)]">
-                        (optional)
-                      </span>
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)]/30 p-4">
+                    <span className="block text-sm font-semibold">
+                      Payment evidence & proof
                     </span>
-
-                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-center transition hover:border-[#b88b48]">
-                      {proofFile ? (
-                        <>
-                          <FileText size={23} className="text-[#b88b48]" />
-                          <span className="mt-2 max-w-full break-all text-sm font-medium">
-                            {proofFile.name}
-                          </span>
-                          <span className="mt-1 text-xs text-[var(--muted)]">
-                            {(proofFile.size / 1024 / 1024).toFixed(2)} MB
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <Upload size={23} className="text-[#b88b48]" />
-                          <span className="mt-2 text-sm font-medium">
-                            Choose a screenshot or PDF
-                          </span>
-                          <span className="mt-1 text-xs text-[var(--muted)]">
-                            JPG, PNG, WebP or PDF · Max 5 MB
-                          </span>
-                        </>
-                      )}
-
-                      <input
-                        type="file"
-                        accept=".jpg,.jpeg,.png,.webp,.pdf"
-                        className="sr-only"
-                        onChange={(event) =>
-                          handleFileChange(event.target.files?.[0] ?? null)
-                        }
-                      />
-                    </label>
-
-                    {proofFile && (
-                      <button
-                        type="button"
-                        onClick={() => setProofFile(null)}
-                        className="mt-2 inline-flex items-center gap-1.5 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
-                      >
-                        <X size={13} />
-                        Remove selected file
-                      </button>
-                    )}
-
-                    <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
-                      This file stays in the current browser form. It is not
-                      uploaded or saved.
+                    <p className="mt-1.5 text-xs leading-5 text-[var(--muted)]">
+                      Proof upload is currently unavailable. Your payment will be verified by an administrator using your transaction reference and payer number.
                     </p>
                   </div>
                 </div>
