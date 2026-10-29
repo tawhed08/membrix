@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -31,8 +32,21 @@ type HomeAuthUser = {
   role: "member" | "admin";
 };
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+type MembershipPlan = {
+  _id: string;
+  name: string;
+  slug: string;
+  description: string;
+  price: number;
+  billingType: "yearly" | "one_time";
+  durationDays?: number;
+  features: string[];
+  isActive: boolean;
+};
+
+const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+).replace(/\/+$/, "");
 
 const themeListeners = new Set<() => void>();
 
@@ -54,71 +68,91 @@ function getServerThemeSnapshot(): Theme {
 }
 
 function applyTheme(nextTheme: Theme) {
-  document.documentElement.classList.toggle(
-    "dark",
-    nextTheme === "dark",
-  );
-
+  document.documentElement.classList.toggle("dark", nextTheme === "dark");
   document.documentElement.dataset.theme = nextTheme;
 
   try {
     localStorage.setItem("membrix-theme", nextTheme);
   } catch {
-    // Theme switching still works when browser storage is unavailable.
+    // Theme switching still works when storage is unavailable.
   }
 
   themeListeners.forEach((listener) => listener());
-
   window.dispatchEvent(new Event("membrix-theme-change"));
 }
 
-const plans = [
-  {
-    number: "01",
-    name: "Essential",
-    description: "A considered start for your membership journey.",
-    price: "৳1,200",
-    period: "per year",
-    icon: ShieldCheck,
-    featured: false,
-    benefits: [
-      "Digital membership card",
-      "Member-only resources",
-      "Community access",
-      "Email support",
-    ],
-  },
-  {
-    number: "02",
-    name: "Prestige",
-    description: "More access for a more connected experience.",
-    price: "৳2,500",
-    period: "per year",
-    icon: Crown,
-    featured: true,
-    benefits: [
-      "Everything in Essential",
-      "Priority member support",
-      "Exclusive event access",
-      "Premium member benefits",
-    ],
-  },
-  {
-    number: "03",
-    name: "Elite",
-    description: "An elevated experience for ambitious members.",
-    price: "৳5,000",
-    period: "per year",
-    icon: Gem,
-    featured: false,
-    benefits: [
-      "Everything in Prestige",
-      "VIP event invitations",
-      "Dedicated assistance",
-      "Exclusive opportunities",
-    ],
-  },
-];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizePlans(payload: unknown): MembershipPlan[] {
+  if (!isRecord(payload)) return [];
+
+  const data = isRecord(payload.data) ? payload.data : payload;
+
+  const candidates = Array.isArray(data.plans)
+    ? data.plans
+    : Array.isArray(data.data)
+      ? data.data
+      : Array.isArray(payload)
+        ? payload
+        : [];
+
+  return candidates
+    .filter(isRecord)
+    .map((plan): MembershipPlan | null => {
+      const id = plan._id ?? plan.id;
+      const name = typeof plan.name === "string" ? plan.name.trim() : "";
+      const price = Number(plan.price ?? plan.amount ?? 0);
+
+      if (!id || !name || !Number.isFinite(price) || price < 0) {
+        return null;
+      }
+
+      const featuresSource = Array.isArray(plan.features)
+        ? plan.features
+        : Array.isArray(plan.benefits)
+          ? plan.benefits
+          : [];
+
+      const features = featuresSource.filter(
+        (feature): feature is string =>
+          typeof feature === "string" && feature.trim().length > 0,
+      );
+
+      const slug =
+        typeof plan.slug === "string" && plan.slug.trim()
+          ? plan.slug.trim()
+          : name.toLowerCase().replace(/\s+/g, "-");
+
+      const billingType =
+        plan.billingType === "one_time" ||
+        plan.billingType === "one-time" ||
+        plan.billingType === "oneTime"
+          ? "one_time"
+          : "yearly";
+
+      const duration = Number(plan.durationDays);
+
+      return {
+        _id: String(id),
+        name,
+        slug,
+        description:
+          typeof plan.description === "string" && plan.description.trim()
+            ? plan.description.trim()
+            : "A membership experience designed around you.",
+        price,
+        billingType,
+        durationDays:
+          Number.isFinite(duration) && duration > 0 ? duration : undefined,
+        features,
+        isActive: plan.isActive !== false,
+      };
+    })
+    .filter((plan): plan is MembershipPlan => plan !== null)
+    .filter((plan) => plan.isActive);
+}
 
 const benefits = [
   {
@@ -165,6 +199,32 @@ const editorialValues = [
   },
 ];
 
+function getPlanIcon(name: string) {
+  const normalized = name.toLowerCase();
+
+  if (normalized.includes("elite")) return Gem;
+  if (normalized.includes("prestige")) return Crown;
+  if (normalized.includes("essential")) return ShieldCheck;
+
+  return Sparkles;
+}
+
+function formatPrice(price: number) {
+  return `৳${new Intl.NumberFormat("en-BD", {
+    maximumFractionDigits: 2,
+  }).format(price)}`;
+}
+
+function getPlanPeriod(plan: MembershipPlan) {
+  if (plan.billingType === "one_time") return "One-time payment";
+
+  if (plan.durationDays && plan.durationDays !== 365) {
+    return `For ${plan.durationDays} days`;
+  }
+
+  return "Per year";
+}
+
 export default function Home() {
   const theme = useSyncExternalStore(
     subscribeTheme,
@@ -177,11 +237,15 @@ export default function Home() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [authNotice, setAuthNotice] = useState("");
 
+  const [plans, setPlans] = useState<MembershipPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState("");
+
   const homeRef = useRef<HTMLElement>(null);
 
-  // Load the authenticated user from the backend.
+  // Load the authenticated user.
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
     async function loadAuthUser() {
       try {
@@ -189,54 +253,38 @@ export default function Home() {
           method: "GET",
           credentials: "include",
           cache: "no-store",
+          signal: controller.signal,
         });
 
         if (!response.ok) {
-          if (!cancelled) {
-            setAuthUser(null);
-          }
+          setAuthUser(null);
           return;
         }
 
         const payload: unknown = await response.json();
 
-        if (typeof payload !== "object" || payload === null) {
-          return;
-        }
+        if (!isRecord(payload)) return;
 
-        const data = payload as Record<string, unknown>;
+        const nested = isRecord(payload.data) ? payload.data : null;
+        const candidate = payload.user ?? nested?.user;
 
-        const nested =
-          typeof data.data === "object" && data.data !== null
-            ? (data.data as Record<string, unknown>)
-            : null;
+        if (!isRecord(candidate)) return;
 
-        const candidate = data.user ?? nested?.user;
+        const userId = candidate.id ?? candidate._id;
 
-        if (typeof candidate !== "object" || candidate === null) {
-          return;
-        }
+        if (!userId || typeof candidate.email !== "string") return;
 
-        const user = candidate as Record<string, unknown>;
-        const userId = user.id ?? user._id;
-
-        if (!userId || typeof user.email !== "string") {
-          return;
-        }
-
-        if (!cancelled) {
-          setAuthUser({
-            id: String(userId),
-            name:
-              typeof user.name === "string" && user.name.trim()
-                ? user.name.trim()
-                : user.email.split("@")[0],
-            email: user.email,
-            role: user.role === "admin" ? "admin" : "member",
-          });
-        }
+        setAuthUser({
+          id: String(userId),
+          name:
+            typeof candidate.name === "string" && candidate.name.trim()
+              ? candidate.name.trim()
+              : candidate.email.split("@")[0],
+          email: candidate.email,
+          role: candidate.role === "admin" ? "admin" : "member",
+        });
       } catch {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setAuthUser(null);
         }
       }
@@ -244,9 +292,57 @@ export default function Home() {
 
     void loadAuthUser();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
+  }, []);
+
+  // Load active membership plans from the backend.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadPlans() {
+      try {
+        setPlansError("");
+
+        const response = await fetch(`${API_URL}/api/plans`, {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("Unable to load membership plans.");
+        }
+
+        const payload: unknown = await response.json();
+
+        if (isRecord(payload) && payload.success === false) {
+          throw new Error(
+            typeof payload.message === "string"
+              ? payload.message
+              : "Unable to load membership plans.",
+          );
+        }
+
+        setPlans(normalizePlans(payload));
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        setPlans([]);
+        setPlansError(
+          error instanceof Error
+            ? error.message
+            : "Something went wrong while loading plans.",
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setPlansLoading(false);
+        }
+      }
+    }
+
+    void loadPlans();
+
+    return () => controller.abort();
   }, []);
 
   // Main GSAP animations.
@@ -330,48 +426,48 @@ export default function Home() {
           "-=0.75",
         );
 
-      gsap.utils
-        .toArray<HTMLElement>(".editorial-reveal")
-        .forEach((element) => {
-          gsap.fromTo(
-            element,
-            { autoAlpha: 0, y: 32 },
-            {
-              autoAlpha: 1,
-              y: 0,
-              duration: 0.8,
-              ease: "power2.out",
-              scrollTrigger: {
-                trigger: element,
-                start: "top 87%",
-                once: true,
-              },
+      gsap.utils.toArray<HTMLElement>(".editorial-reveal").forEach((element) => {
+        gsap.fromTo(
+          element,
+          { autoAlpha: 0, y: 32 },
+          {
+            autoAlpha: 1,
+            y: 0,
+            duration: 0.8,
+            ease: "power2.out",
+            scrollTrigger: {
+              trigger: element,
+              start: "top 87%",
+              once: true,
             },
-          );
-        });
+          },
+        );
+      });
 
-      gsap.utils
-        .toArray<HTMLElement>(".editorial-stagger")
-        .forEach((group) => {
-          const children = group.querySelectorAll(".stagger-item");
+      gsap.utils.toArray<HTMLElement>(".editorial-stagger").forEach((group) => {
+        const children = group.querySelectorAll(
+          ".stagger-item:not(.membership-plan-card)",
+        );
 
-          gsap.fromTo(
-            children,
-            { autoAlpha: 0, y: 28 },
-            {
-              autoAlpha: 1,
-              y: 0,
-              duration: 0.65,
-              stagger: 0.13,
-              ease: "power2.out",
-              scrollTrigger: {
-                trigger: group,
-                start: "top 83%",
-                once: true,
-              },
+        if (!children.length) return;
+
+        gsap.fromTo(
+          children,
+          { autoAlpha: 0, y: 28 },
+          {
+            autoAlpha: 1,
+            y: 0,
+            duration: 0.65,
+            stagger: 0.13,
+            ease: "power2.out",
+            scrollTrigger: {
+              trigger: group,
+              start: "top 83%",
+              once: true,
             },
-          );
-        });
+          },
+        );
+      });
 
       gsap.fromTo(
         ".editorial-value",
@@ -444,10 +540,44 @@ export default function Home() {
       });
     }, root);
 
-    return () => {
-      ctx.revert();
-    };
+    return () => ctx.revert();
   }, []);
+
+  // Animate membership cards after plans have loaded.
+  useEffect(() => {
+    const root = homeRef.current;
+
+    if (!root || !plans.length) return;
+
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+
+    if (reduceMotion) return;
+
+    gsap.registerPlugin(ScrollTrigger);
+
+    const ctx = gsap.context(() => {
+      gsap.fromTo(
+        ".membership-plan-card",
+        { autoAlpha: 0, y: 28 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          duration: 0.65,
+          stagger: 0.13,
+          ease: "power2.out",
+          scrollTrigger: {
+            trigger: "#membership",
+            start: "top 75%",
+            once: true,
+          },
+        },
+      );
+    }, root);
+
+    return () => ctx.revert();
+  }, [plans]);
 
   function toggleTheme() {
     applyTheme(theme === "dark" ? "light" : "dark");
@@ -486,6 +616,9 @@ export default function Home() {
   }
 
   const firstName = authUser?.name.trim().split(/\s+/)[0] || "Profile";
+
+  const dashboardUrl =
+    authUser?.role === "admin" ? "/admin" : "/dashboard";
 
   return (
     <main
@@ -554,9 +687,9 @@ export default function Home() {
             {authUser ? (
               <>
                 <a
-                  href={authUser.role === "admin" ? "/admin" : "/dashboard"}
+                  href={dashboardUrl}
                   className="button button-gold hidden items-center gap-2 sm:inline-flex"
-                  title={`${authUser.role === "admin" ? "Admin Dashboard" : "Dashboard"} for ${authUser.name}`}
+                  title={`Dashboard for ${authUser.name}`}
                 >
                   {authUser.role === "admin" ? (
                     <ShieldCheck size={16} />
@@ -571,7 +704,7 @@ export default function Home() {
                   type="button"
                   onClick={() => void handleHomeLogout()}
                   disabled={loggingOut}
-                  className="button button-outline hidden items-center gap-2 sm:inline-flex disabled:opacity-60"
+                  className="button button-outline hidden items-center gap-2 disabled:opacity-60 sm:inline-flex"
                 >
                   <LogOut size={15} />
                   {loggingOut ? "Signing out..." : "Sign out"}
@@ -655,7 +788,7 @@ export default function Home() {
               {authUser ? (
                 <>
                   <a
-                    href={authUser.role === "admin" ? "/admin" : "/dashboard"}
+                    href={dashboardUrl}
                     className="button button-gold mt-2 justify-center"
                     onClick={closeMenu}
                   >
@@ -717,12 +850,8 @@ export default function Home() {
             </div>
 
             <h1 className="mb-8 max-w-[850px] text-[clamp(3.5rem,8.2vw,7.8rem)] font-medium leading-[0.94] tracking-[-0.085em]">
-              <span className="editorial-title-line block">
-                Membership,
-              </span>
-              <span className="editorial-title-line block">
-                reimagined
-              </span>
+              <span className="editorial-title-line block">Membership,</span>
+              <span className="editorial-title-line block">reimagined</span>
               <span className="editorial-title-line block font-serif italic font-normal tracking-[-0.075em] text-[#b89554]">
                 around you.
               </span>
@@ -923,9 +1052,9 @@ export default function Home() {
             </div>
 
             <p className="max-w-[460px] text-sm leading-7 text-[var(--muted)] sm:text-base sm:leading-8 lg:pb-2">
-              The best membership experience does more than keep
-              things organized. It gives people and organizations
-              a clearer way to connect, participate and grow together.
+              The best membership experience does more than keep things
+              organized. It gives people and organizations a clearer way to
+              connect, participate and grow together.
             </p>
           </div>
 
@@ -997,96 +1126,177 @@ export default function Home() {
             </div>
 
             <p className="max-w-[390px] text-sm leading-7 text-[var(--muted)] sm:text-base">
-              Explore the membership options and find the level
-              of access that suits your needs.
+              Explore the membership options and find the level of access that
+              suits your needs.
             </p>
           </div>
 
-          <div className="editorial-stagger grid gap-4 lg:grid-cols-3">
-            {plans.map((plan) => {
-              const Icon = plan.icon;
-
-              return (
-                <article
-                  key={plan.name}
-                  className={`stagger-item group relative flex flex-col border p-6 transition-colors duration-300 hover:border-[#b89554]/70 sm:p-8 lg:p-9 ${
-                    plan.featured
-                      ? "border-[#b89554]/65 bg-[var(--background)]"
-                      : "border-[var(--border)] bg-[var(--background)]"
-                  }`}
+          {plansLoading ? (
+            <div
+              className="grid gap-4 lg:grid-cols-3"
+              aria-label="Loading membership plans"
+              aria-live="polite"
+            >
+              {[1, 2, 3].map((item) => (
+                <div
+                  key={item}
+                  className="min-h-[430px] animate-pulse border border-[var(--border)] bg-[var(--background)] p-8"
                 >
-                  {plan.featured && (
-                    <div className="mb-6 flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#b89554]">
-                      <Sparkles size={14} />
-                      Recommended option
-                    </div>
-                  )}
-
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="text-[10px] tracking-[0.16em] text-[var(--muted)]">
-                        PLAN {plan.number}
-                      </span>
-                      <h3 className="mt-3 text-3xl font-medium tracking-[-0.06em]">
-                        {plan.name}
-                      </h3>
-                    </div>
-
-                    <Icon
-                      size={25}
-                      strokeWidth={1.4}
-                      className="text-[#b89554] transition-transform duration-300 group-hover:-translate-y-1"
-                    />
-                  </div>
-
-                  <p className="mt-4 min-h-[48px] text-sm leading-6 text-[var(--muted)]">
-                    {plan.description}
-                  </p>
-
-                  <div className="mt-8 border-b border-[var(--border)] pb-7">
-                    <span className="text-4xl font-medium tracking-[-0.06em] sm:text-5xl">
-                      {plan.price}
-                    </span>
-                    <span className="mt-2 block text-xs text-[var(--muted)]">
-                      {plan.period}
-                    </span>
-                  </div>
-
-                  <p className="mb-5 mt-7 text-[9px] font-semibold uppercase tracking-[0.19em] text-[var(--muted)]">
-                    Included in your membership
-                  </p>
-
-                  <ul className="mb-9 space-y-4">
-                    {plan.benefits.map((benefit) => (
-                      <li
-                        key={benefit}
-                        className="flex items-start gap-3 text-sm leading-6"
-                      >
-                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#b89554]/12 text-[#b89554]">
-                          <Check size={12} strokeWidth={2} />
-                        </span>
-                        {benefit}
-                      </li>
+                  <div className="h-3 w-20 rounded bg-[var(--border)]" />
+                  <div className="mt-6 h-8 w-36 rounded bg-[var(--border)]" />
+                  <div className="mt-5 h-4 w-full rounded bg-[var(--border)]" />
+                  <div className="mt-3 h-4 w-2/3 rounded bg-[var(--border)]" />
+                  <div className="mt-10 h-12 w-40 rounded bg-[var(--border)]" />
+                  <div className="mt-9 space-y-4">
+                    {[1, 2, 3, 4].map((line) => (
+                      <div
+                        key={line}
+                        className="h-4 w-full rounded bg-[var(--border)]"
+                      />
                     ))}
-                  </ul>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : plansError ? (
+            <div
+              role="alert"
+              className="border border-[var(--border)] bg-[var(--background)] px-6 py-12 text-center"
+            >
+              <p className="text-lg font-medium">
+                Membership plans are temporarily unavailable.
+              </p>
+              <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+                {plansError} Please check your connection and try again.
+              </p>
+              <button
+                type="button"
+                className="button button-gold mt-6"
+                onClick={() => window.location.reload()}
+              >
+                Try again
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          ) : plans.length === 0 ? (
+            <div className="border border-[var(--border)] bg-[var(--background)] px-6 py-14 text-center">
+              <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-[var(--border)] text-[#b89554]">
+                <Gem size={21} />
+              </span>
+              <h3 className="mt-5 text-xl font-medium">
+                Your membership journey starts here.
+              </h3>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-[var(--muted)]">
+                Membership plans are being prepared. Please check back soon
+                or contact our team for more information.
+              </p>
+              <a href="/contact" className="button button-outline mt-6">
+                Contact us
+                <ArrowRight size={16} />
+              </a>
+            </div>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-3">
+              {plans.map((plan, index) => {
+                const Icon = getPlanIcon(plan.name);
+                const featured =
+                  plan.name.toLowerCase() === "prestige" ||
+                  (plans.length === 1 && index === 0);
 
-                  <a
-                    href="/register"
-                    className={`button mt-auto w-full ${
-                      plan.featured ? "button-gold" : "button-plan"
+                const checkoutUrl = `/checkout?plan=${encodeURIComponent(
+                  plan.slug,
+                )}`;
+
+                return (
+                  <article
+                    key={plan._id}
+                    className={`membership-plan-card group relative flex flex-col border p-6 transition-colors duration-300 hover:border-[#b89554]/70 sm:p-8 lg:p-9 ${
+                      featured
+                        ? "border-[#b89554]/65 bg-[var(--background)]"
+                        : "border-[var(--border)] bg-[var(--background)]"
                     }`}
                   >
-                    Choose {plan.name}
-                    <ArrowRight size={16} />
-                  </a>
-                </article>
-              );
-            })}
-          </div>
+                    {featured && (
+                      <div className="mb-6 flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#b89554]">
+                        <Sparkles size={14} />
+                        Recommended option
+                      </div>
+                    )}
+
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <span className="text-[10px] tracking-[0.16em] text-[var(--muted)]">
+                          PLAN {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <h3 className="mt-3 text-3xl font-medium tracking-[-0.06em]">
+                          {plan.name}
+                        </h3>
+                      </div>
+
+                      <Icon
+                        size={25}
+                        strokeWidth={1.4}
+                        className="text-[#b89554] transition-transform duration-300 group-hover:-translate-y-1"
+                      />
+                    </div>
+
+                    <p className="mt-4 min-h-[48px] text-sm leading-6 text-[var(--muted)]">
+                      {plan.description}
+                    </p>
+
+                    <div className="mt-8 border-b border-[var(--border)] pb-7">
+                      <span className="text-4xl font-medium tracking-[-0.06em] sm:text-5xl">
+                        {formatPrice(plan.price)}
+                      </span>
+                      <span className="mt-2 block text-xs text-[var(--muted)]">
+                        {getPlanPeriod(plan)}
+                      </span>
+                    </div>
+
+                    <p className="mb-5 mt-7 text-[9px] font-semibold uppercase tracking-[0.19em] text-[var(--muted)]">
+                      Included in your membership
+                    </p>
+
+                    {plan.features.length > 0 ? (
+                      <ul className="mb-9 space-y-4">
+                        {plan.features.map((feature, featureIndex) => (
+                          <li
+                            key={`${plan._id}-${featureIndex}`}
+                            className="flex items-start gap-3 text-sm leading-6"
+                          >
+                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#b89554]/12 text-[#b89554]">
+                              <Check size={12} strokeWidth={2} />
+                            </span>
+                            {feature}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mb-9 text-sm leading-6 text-[var(--muted)]">
+                        Membership benefits will be confirmed during
+                        registration.
+                      </p>
+                    )}
+
+                    <a
+                      href={checkoutUrl}
+                      className={`button mt-auto w-full ${
+                        featured ? "button-gold" : "button-plan"
+                      }`}
+                    >
+                      Choose {plan.name}
+                      <ArrowRight size={16} />
+                    </a>
+                  </article>
+                );
+              })}
+            </div>
+          )}
 
           <p className="editorial-reveal mt-6 text-xs leading-6 text-[var(--muted)]">
-            Note: The plans, prices and benefits displayed here are
-            illustrative and should be confirmed before launch.
+            Membership availability, pricing and benefits are provided by
+            Membrix. Please review your selected plan before completing
+            checkout.
           </p>
         </div>
       </section>
@@ -1145,10 +1355,9 @@ export default function Home() {
             </h2>
 
             <p className="mt-7 max-w-[520px] text-sm leading-8 text-[var(--muted)] sm:text-base">
-              Great membership experiences begin with people,
-              not processes. Membrix is being designed to make
-              membership management more organized, more accessible
-              and easier to navigate.
+              Great membership experiences begin with people, not processes.
+              Membrix is being designed to make membership management more
+              organized, more accessible and easier to navigate.
             </p>
 
             <div className="editorial-values mt-10 border-t border-[var(--border)]">
@@ -1207,22 +1416,13 @@ export default function Home() {
             </h2>
 
             <p className="mt-7 max-w-[490px] text-sm leading-7 text-white/65 sm:text-base sm:leading-8">
-              Discover a more considered way to manage memberships
-              and bring your community closer together.
+              Discover a more considered way to manage memberships and bring
+              your community closer together.
             </p>
           </div>
 
           <div className="editorial-reveal flex flex-col items-start gap-4 lg:items-end">
-            <a
-              href={
-                authUser
-                  ? authUser.role === "admin"
-                    ? "/admin"
-                    : "/dashboard"
-                  : "/register"
-              }
-              className="button button-gold"
-            >
+            <a href={authUser ? dashboardUrl : "/register"} className="button button-gold">
               {authUser
                 ? authUser.role === "admin"
                   ? "Admin Dashboard"
@@ -1257,8 +1457,8 @@ export default function Home() {
               </a>
 
               <p className="mt-4 max-w-[300px] text-sm leading-7 text-[var(--muted)]">
-                Membership, thoughtfully reimagined. Built around
-                people and better connections.
+                Membership, thoughtfully reimagined. Built around people and
+                better connections.
               </p>
             </div>
 
@@ -1306,11 +1506,7 @@ export default function Home() {
                   <>
                     <a
                       className="transition-colors hover:text-[#b89554]"
-                      href={
-                        authUser.role === "admin"
-                          ? "/admin"
-                          : "/dashboard"
-                      }
+                      href={dashboardUrl}
                     >
                       {authUser.role === "admin"
                         ? "Admin Dashboard"

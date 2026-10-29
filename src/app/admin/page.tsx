@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -20,6 +21,7 @@ import {
   CheckCircle2,
   Clock3,
   CreditCard,
+  Layers,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -30,8 +32,9 @@ import {
   X,
 } from "lucide-react";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+).replace(/\/+$/, "");
 
 type AdminUser = {
   id: string;
@@ -229,6 +232,7 @@ function StatCard({
 
       <div className="mt-5 flex items-center justify-between border-t border-[var(--border)] pt-4 text-xs text-[var(--muted)]">
         <p className="leading-5">{description}</p>
+
         {href && (
           <span className="ml-2 inline-flex shrink-0 items-center gap-1 font-medium text-[#b99a5b] opacity-0 transition-opacity group-hover:opacity-100">
             View <ArrowRight size={12} />
@@ -270,6 +274,29 @@ function SectionHeading({
         {description}
       </p>
     </div>
+  );
+}
+
+function MembershipPlansLink({
+  mobile = false,
+  onClick,
+}: {
+  mobile?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <Link
+      href="/admin/plans"
+      onClick={onClick}
+      className={
+        mobile
+          ? "flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/70 transition hover:bg-white/5 hover:text-white"
+          : "flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/5 hover:text-white"
+      }
+    >
+      <Layers size={18} className="shrink-0 text-[#e6ca8b]" />
+      <span>Membership Plans</span>
+    </Link>
   );
 }
 
@@ -551,6 +578,8 @@ export default function AdminPage() {
                   </span>
                 )}
               </Link>
+
+              <MembershipPlansLink />
             </nav>
           </div>
 
@@ -697,7 +726,7 @@ export default function AdminPage() {
               </div>
             </section>
 
-            {/* Quick action shortcuts */}
+            {/* Quick actions */}
             <section className="admin-reveal mb-8 flex flex-wrap items-center gap-3">
               <Link
                 href="/admin/members"
@@ -714,6 +743,15 @@ export default function AdminPage() {
               >
                 <Wallet size={16} />
                 Manage payments
+                <ArrowRight size={14} />
+              </Link>
+
+              <Link
+                href="/admin/plans"
+                className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:border-[#d6b878]/60 hover:text-[#a98843]"
+              >
+                <Layers size={16} className="text-[#b99a5b]" />
+                Manage membership plans
                 <ArrowRight size={14} />
               </Link>
             </section>
@@ -955,7 +993,9 @@ export default function AdminPage() {
                             <th className="px-5 py-4 font-medium">Amount</th>
                             <th className="px-5 py-4 font-medium">Status</th>
                             <th className="px-5 py-4 font-medium">Date</th>
-                            <th className="px-5 py-4 text-right font-medium">Action</th>
+                            <th className="px-5 py-4 text-right font-medium">
+                              Action
+                            </th>
                           </tr>
                         </thead>
 
@@ -969,7 +1009,6 @@ export default function AdminPage() {
                                 <div className="font-medium">
                                   {getMemberName(payment.user)}
                                 </div>
-
                                 <div className="mt-1 text-xs text-[var(--muted)]">
                                   {getMemberEmail(payment.user) || "—"}
                                 </div>
@@ -1000,7 +1039,8 @@ export default function AdminPage() {
                               </td>
 
                               <td className="whitespace-nowrap px-5 py-4 text-right">
-                                {payment.status === "pending" || payment.status === "processing" ? (
+                                {payment.status === "pending" ||
+                                payment.status === "processing" ? (
                                   <Link
                                     href={`/admin/payments?status=${payment.status}`}
                                     className="inline-flex items-center gap-1 text-xs font-semibold text-[#a98843] hover:underline"
@@ -1087,10 +1127,14 @@ export default function AdminPage() {
             </p>
 
             <div className="space-y-1">
-              <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/10 px-3.5 py-3 text-sm font-medium">
+              <Link
+                href="/admin"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/10 px-3.5 py-3 text-sm font-medium"
+              >
                 <LayoutDashboard size={18} className="text-[#e6ca8b]" />
                 Overview
-              </div>
+              </Link>
 
               <Link
                 href="/admin/members"
@@ -1109,6 +1153,11 @@ export default function AdminPage() {
                 <Wallet size={18} />
                 Payments
               </Link>
+
+              <MembershipPlansLink
+                mobile
+                onClick={() => setMobileMenuOpen(false)}
+              />
             </div>
 
             <div className="mt-6 border-t border-white/10 pt-4">

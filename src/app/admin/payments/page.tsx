@@ -586,7 +586,7 @@ export default function AdminPaymentsPage() {
     } finally {
       setOverviewLoading(false);
     }
-  }, []);
+  }, [router]);
 
   const loadPayments = useCallback(async () => {
     setLoading(true);
@@ -666,7 +666,7 @@ export default function AdminPaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [method, page, search, status]);
+  }, [router, method, page, search, status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -750,7 +750,7 @@ export default function AdminPaymentsPage() {
     }, containerRef);
 
     return () => context.revert();
-  }, []);
+  }, [router]);
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -23,55 +23,26 @@ const API_URL = (
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 ).replace(/\/+$/, "");
 
-type PlanId = "essential" | "premium" | "lifetime";
-
 type PaymentMethod = "bkash" | "nagad" | "bank" | "online";
 
-const plans: Record<
-  PlanId,
-  {
-    name: string;
-    price: string;
-    billing: string;
-    description: string;
-    features: string[];
-  }
-> = {
-  essential: {
-    name: "Essential",
-    price: "৳500",
-    billing: "per year",
-    description: "A simple starting point for your membership journey.",
-    features: [
-      "Personal member profile",
-      "Membership status tracking",
-      "Member announcements",
-    ],
-  },
-  premium: {
-    name: "Premium",
-    price: "৳1,000",
-    billing: "per year",
-    description: "More value for members ready to get involved.",
-    features: [
-      "Everything in Essential",
-      "Digital membership card",
-      "Priority member support",
-      "Membership history",
-    ],
-  },
-  lifetime: {
-    name: "Lifetime",
-    price: "৳5,000",
-    billing: "one-time",
-    description: "A long-term membership option.",
-    features: [
-      "Lifetime membership option",
-      "Digital membership card",
-      "Member profile and history",
-      "Priority support",
-    ],
-  },
+type MembershipPlan = {
+  _id: string;
+  name: string;
+  slug: string;
+  description: string;
+  price: number;
+  billingType: "yearly" | "one_time";
+  durationDays: number | null;
+  features: string[];
+  isActive: boolean;
+};
+
+type PlansResponse = {
+  success: boolean;
+  message?: string;
+  data?: {
+    plans?: MembershipPlan[];
+  };
 };
 
 const paymentMethods: {
@@ -106,29 +77,127 @@ const paymentMethods: {
   },
 ];
 
+const formatPrice = (price: number) =>
+  `৳${new Intl.NumberFormat("en-BD", {
+    maximumFractionDigits: 2,
+  }).format(price)}`;
+
+function getBillingLabel(plan: MembershipPlan) {
+  if (plan.billingType === "one_time") {
+    return "one-time";
+  }
+
+  if (plan.durationDays && plan.durationDays !== 365) {
+    return `${plan.durationDays} days`;
+  }
+
+  return "per year";
+}
+
 function CheckoutContent() {
   const searchParams = useSearchParams();
   const pageRef = useRef<HTMLElement>(null);
 
-  const rawPlan = searchParams.get("plan")?.toLowerCase() ?? "essential";
+  const requestedPlan =
+    searchParams.get("plan")?.trim().toLowerCase() ?? "";
 
-  const initialPlan: PlanId =
-    rawPlan === "premium" || rawPlan === "lifetime" || rawPlan === "essential"
-      ? rawPlan
-      : "essential";
+  const [plans, setPlans] = useState<MembershipPlan[]>([]);
+  const [selectedPlanSlug, setSelectedPlanSlug] =
+    useState(requestedPlan);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(true);
+  const [plansError, setPlansError] = useState("");
 
-  const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan);
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentMethod>("bkash");
   const [transactionId, setTransactionId] = useState("");
   const [payerNumber, setPayerNumber] = useState("");
   const [notice, setNotice] = useState("");
-  const [noticeType, setNoticeType] = useState<"info" | "error">("info");
-const [isSubmitting, setIsSubmitting] = useState(false);
+  const [noticeType, setNoticeType] = useState<"info" | "error">(
+    "info",
+  );
 
-  const plan = plans[selectedPlan];
+  const effectivePlanSlug =
+    requestedPlan ||
+    selectedPlanSlug ||
+    (plans.length > 0 ? plans[0].slug : "");
+
+  const selectedPlan = plans.find(
+    (plan) => plan.slug === effectivePlanSlug
+  );
+
   const isManualPayment = paymentMethod !== "online";
 
+  // Load active membership plans from the existing public API.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadPlans() {
+      setIsLoadingPlans(true);
+      setPlansError("");
+
+      try {
+        const response = await fetch(`${API_URL}/api/plans`, {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+
+        const result = (await response.json()) as PlansResponse;
+
+        if (!response.ok || !result.success) {
+          throw new Error(
+            result.message || "Unable to load membership plans.",
+          );
+        }
+
+        if (!Array.isArray(result.data?.plans)) {
+          throw new Error("The plans response has an unexpected format.");
+        }
+
+        const activePlans = result.data.plans.filter(
+          (item) =>
+            item &&
+            typeof item._id === "string" &&
+            typeof item.name === "string" &&
+            typeof item.slug === "string" &&
+            item.slug.length > 0 &&
+            typeof item.description === "string" &&
+            Number.isFinite(item.price) &&
+            item.price >= 0 &&
+            (item.billingType === "yearly" ||
+              item.billingType === "one_time") &&
+            item.isActive === true &&
+            Array.isArray(item.features),
+        );
+
+        setPlans(activePlans);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        setPlans([]);
+        setPlansError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load membership plans. Please try again.",
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingPlans(false);
+        }
+      }
+    }
+
+    void loadPlans();
+
+    return () => controller.abort();
+  }, []);
+
+  // Follow the URL when the requested plan changes.
+const plan = plans.find(
+  (item) => item.slug === effectivePlanSlug
+);
+
+  // Animate page sections when the checkout renders.
   useEffect(() => {
     if (!pageRef.current) return;
 
@@ -153,101 +222,21 @@ const [isSubmitting, setIsSubmitting] = useState(false);
     return () => ctx.revert();
   }, []);
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (isLoadingPlans || plansError || !plan) {
+      setNoticeType("error");
+      setNotice("Please select an available membership plan first.");
+      return;
+    }
+
+    // This page is explicitly in preview mode.
+    // No payment endpoint is called and no payment data is transmitted.
     setNoticeType("info");
-
-    // Prevent duplicate submissions
-    if (isSubmitting) {
-      return;
-    }
-
-    // Validate transaction ID for manual payments
-    if (isManualPayment && !transactionId.trim()) {
-      setNoticeType("error");
-      setNotice("Enter the transaction ID to continue.");
-      return;
-    }
-
-    setIsSubmitting(true);
-    setNotice("");
-
-    try {
-      if (!isManualPayment) {
-        // Online gateway initiation via verified aamarPay backend route
-        const res = await fetch(`${API_URL}/api/payments/aamarpay/initiate`, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            planSlug: selectedPlan,
-          }),
-        });
-
-        const data = await res.json();
-
-        if (res.status === 401) {
-          setNoticeType("error");
-          setNotice("Please sign in to your member account before continuing.");
-          return;
-        }
-
-        if (res.ok && data.payment_url) {
-          window.location.href = String(data.payment_url);
-          return;
-        }
-
-        setNoticeType("error");
-        setNotice(
-          data.message ||
-            "The online payment gateway is currently unavailable. Please select a manual payment method.",
-        );
-        return;
-      }
-
-      const payload = {
-        planSlug: selectedPlan,
-        method: paymentMethod,
-        transactionId: transactionId.trim(),
-        payerNumber: payerNumber.trim() || undefined,
-      };
-
-      const res = await fetch(`${API_URL}/api/payments/manual/submit`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      if (res.status === 401) {
-        setNoticeType("error");
-        setNotice("Please sign in to your member account before submitting payment.");
-        return;
-      }
-
-      if (res.ok && data.success) {
-        setNoticeType("info");
-        setNotice(
-          `Payment submitted successfully (Reference: ${data.payment.transactionId}). Your membership is now pending admin review.`,
-        );
-        setTransactionId("");
-        setPayerNumber("");
-      } else {
-        setNoticeType("error");
-        setNotice(data.message ?? "Failed to submit payment.");
-      }
-    } catch {
-      setNoticeType("error");
-      setNotice("Network error while submitting payment. Please check your connection.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    setNotice(
+      `Checkout preview ready for ${plan.name} (${formatPrice(plan.price)}). No payment has been submitted. Payment processing must be enabled before you can pay.`,
+    );
   }
 
   return (
@@ -261,6 +250,7 @@ const [isSubmitting, setIsSubmitting] = useState(false);
             <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#d6b878]/40 bg-[#d6b878]/10 text-[#b99a5b]">
               <Sparkles size={21} />
             </span>
+
             <span className="text-xl font-semibold tracking-tight">
               Membrix<span className="text-[#b99a5b]">.</span>
             </span>
@@ -281,7 +271,7 @@ const [isSubmitting, setIsSubmitting] = useState(false);
         <div data-checkout-animate className="mb-9 max-w-2xl">
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#b88b48]/30 bg-[#b88b48]/10 px-3 py-1.5 text-xs font-medium text-[#b88b48]">
             <LockKeyhole size={14} />
-            Secure checkout preview
+            Membership checkout preview
           </div>
 
           <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
@@ -290,9 +280,8 @@ const [isSubmitting, setIsSubmitting] = useState(false);
           </h1>
 
           <p className="mt-4 max-w-xl text-sm leading-7 text-[var(--muted)] sm:text-base">
-            Review your selected plan and explore the available payment
-            options. This checkout is a frontend preview; payments are not
-            active yet.
+            Choose an active membership plan and review its current
+            price and benefits from Membrix.
           </p>
         </div>
 
@@ -301,12 +290,16 @@ const [isSubmitting, setIsSubmitting] = useState(false);
             size={21}
             className="mt-0.5 shrink-0 text-[#b88b48]"
           />
+
           <div>
-            <p className="text-sm font-semibold">Demo checkout — no real payment</p>
+            <p className="text-sm font-semibold">
+              Preview mode — no payment will be taken
+            </p>
+
             <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-              All prices shown below are illustrative placeholders. Final
-              membership pricing is yet to be determined. Payment submission,
-              verification and membership activation are not enabled.
+              Prices and plan details are loaded from the membership
+              database. Payment submission is disabled on this preview
+              page. Do not send money based on these payment options.
             </p>
           </div>
         </div>
@@ -321,57 +314,114 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#b88b48]/10 text-[#b88b48]">
                   <Sparkles size={19} />
                 </span>
+
                 <div>
-                  <h2 className="text-lg font-semibold">01. Select membership</h2>
+                  <h2 className="text-lg font-semibold">
+                    01. Select membership
+                  </h2>
+
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    Choose a plan to preview its details.
+                    Choose an active plan to review its details.
                   </p>
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3">
-                {(Object.entries(plans) as [PlanId, (typeof plans)[PlanId]][]).map(
-                  ([id, item]) => {
-                    const isSelected = selectedPlan === id;
+              {isLoadingPlans ? (
+                <div
+                  className="rounded-2xl border border-[var(--border)] p-6 text-sm text-[var(--muted)]"
+                  role="status"
+                >
+                  Loading membership plans...
+                </div>
+              ) : plansError ? (
+                <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5">
+                  <p className="text-sm font-semibold text-red-600 dark:text-red-300">
+                    Unable to load plans
+                  </p>
 
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedPlan(id);
-                          setNotice("");
-                        }}
-                        aria-pressed={isSelected}
-                        className={`relative rounded-2xl border p-4 text-left transition ${
-                          isSelected
-                            ? "border-[#b88b48] bg-[#b88b48]/10"
-                            : "border-[var(--border)] hover:border-[#b88b48]/60"
-                        }`}
-                      >
-                        {isSelected && (
-                          <span className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-[#b88b48] text-white">
-                            <Check size={12} />
+                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                    {plansError}
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="mt-4 inline-flex items-center gap-2 rounded-xl border border-[var(--border)] px-4 py-2 text-sm font-medium transition hover:border-[#b88b48]"
+                  >
+                    Try again
+                    <ArrowRight size={15} />
+                  </button>
+                </div>
+              ) : plans.length === 0 ? (
+                <div className="rounded-2xl border border-[var(--border)] p-6">
+                  <p className="text-sm font-semibold">
+                    No active membership plans
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                    There are currently no active plans available for
+                    checkout. Please check back later or contact our team.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {plans.map((item) => {
+                      const isSelected = selectedPlanSlug === item.slug;
+
+                      return (
+                        <button
+                          key={item._id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedPlanSlug(item.slug);
+                            setNotice("");
+                          }}
+                          aria-pressed={isSelected}
+                          className={`relative rounded-2xl border p-4 text-left transition ${
+                            isSelected
+                              ? "border-[#b88b48] bg-[#b88b48]/10"
+                              : "border-[var(--border)] hover:border-[#b88b48]/60"
+                          }`}
+                        >
+                          {isSelected && (
+                            <span className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-[#b88b48] text-white">
+                              <Check size={12} />
+                            </span>
+                          )}
+
+                          <span className="block pr-6 text-sm font-semibold">
+                            {item.name}
                           </span>
-                        )}
 
-                        <span className="block pr-5 text-sm font-semibold">
-                          {item.name}
-                        </span>
-                        <span className="mt-3 block text-xl font-semibold tracking-tight">
-                          {item.price}
-                        </span>
-                        <span className="mt-1 block text-xs text-[var(--muted)]">
-                          {item.billing}
-                        </span>
-                        <span className="mt-3 block text-[11px] leading-5 text-[#b88b48]">
-                          Placeholder price
-                        </span>
-                      </button>
-                    );
-                  },
-                )}
-              </div>
+                          <span className="mt-3 block break-words text-xl font-semibold tracking-tight">
+                            {formatPrice(item.price)}
+                          </span>
+
+                          <span className="mt-1 block text-xs text-[var(--muted)]">
+                            {getBillingLabel(item)}
+                          </span>
+
+                          <span className="mt-3 block text-[11px] leading-5 text-[#b88b48]">
+                            Database price
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {requestedPlan && !plan && (
+                    <div
+                      role="status"
+                      className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm leading-6 text-[var(--muted)]"
+                    >
+                      The requested plan &quot;{requestedPlan}&quot; is
+                      unavailable or inactive. Select one of the active
+                      plans above to continue.
+                    </div>
+                  )}
+                </>
+              )}
             </section>
 
             <section
@@ -382,10 +432,14 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#b88b48]/10 text-[#b88b48]">
                   <Wallet size={19} />
                 </span>
+
                 <div>
-                  <h2 className="text-lg font-semibold">02. Payment method</h2>
+                  <h2 className="text-lg font-semibold">
+                    02. Payment method
+                  </h2>
+
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    Select your preferred payment option.
+                    Preview the payment options planned for Membrix.
                   </p>
                 </div>
               </div>
@@ -418,6 +472,7 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                         <span className="block text-sm font-semibold">
                           {method.name}
                         </span>
+
                         <span className="mt-1 block text-xs leading-5 text-[var(--muted)]">
                           {method.description}
                         </span>
@@ -441,12 +496,13 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                 <div className="mt-6 space-y-5 border-t border-[var(--border)] pt-6">
                   <div>
                     <h3 className="text-sm font-semibold">
-                      Manual payment details
+                      Manual payment preview
                     </h3>
+
                     <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-                      The actual recipient account and payment instructions
-                      will be configured securely when the backend is ready.
-                      Do not send money based on this preview.
+                      Payment instructions and recipient accounts have
+                      not been enabled. The fields below are for UI
+                      preview only; do not enter real payment information.
                     </p>
                   </div>
 
@@ -454,17 +510,20 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                     <label className="block">
                       <span className="mb-2 block text-sm font-medium">
                         Transaction ID
-                        <span className="ml-1 text-[#b88b48]">*</span>
+                        <span className="ml-1 text-xs font-normal text-[var(--muted)]">
+                          (preview only)
+                        </span>
                       </span>
+
                       <input
                         value={transactionId}
                         onChange={(event) => {
                           setTransactionId(event.target.value);
                           setNotice("");
                         }}
-                        required
                         maxLength={120}
-                        placeholder="Enter transaction reference"
+                        placeholder="Example reference"
+                        autoComplete="off"
                         className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus:border-[#b88b48] focus:ring-2 focus:ring-[#b88b48]/15"
                       />
                     </label>
@@ -473,9 +532,10 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                       <span className="mb-2 block text-sm font-medium">
                         Payer number
                         <span className="ml-1 text-xs font-normal text-[var(--muted)]">
-                          (optional)
+                          (preview only)
                         </span>
                       </span>
+
                       <input
                         value={payerNumber}
                         onChange={(event) => {
@@ -483,7 +543,8 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                           setNotice("");
                         }}
                         maxLength={30}
-                        placeholder="e.g. 01XXXXXXXXX"
+                        placeholder="Example: 01XXXXXXXXX"
+                        autoComplete="off"
                         className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus:border-[#b88b48] focus:ring-2 focus:ring-[#b88b48]/15"
                       />
                     </label>
@@ -491,10 +552,12 @@ const [isSubmitting, setIsSubmitting] = useState(false);
 
                   <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)]/30 p-4">
                     <span className="block text-sm font-semibold">
-                      Payment evidence & proof
+                      Payment evidence
                     </span>
+
                     <p className="mt-1.5 text-xs leading-5 text-[var(--muted)]">
-                      Proof upload is currently unavailable. Your payment will be verified by an administrator using your transaction reference and payer number.
+                      File uploads and payment verification are not
+                      enabled in preview mode.
                     </p>
                   </div>
                 </div>
@@ -505,14 +568,17 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                       size={20}
                       className="mt-0.5 shrink-0 text-[#b88b48]"
                     />
+
                     <div>
                       <h3 className="text-sm font-semibold">
                         Online gateway preview
                       </h3>
+
                       <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-                        The gateway is not connected. No payment session will
-                        be created, and no card or banking details are needed
-                        here.
+                        The payment gateway is not enabled on this
+                        preview page. No payment session will be
+                        created, and no card or banking details are
+                        required.
                       </p>
                     </div>
                   </div>
@@ -538,25 +604,31 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                     className="mt-0.5 shrink-0 text-[#b88b48]"
                   />
                 )}
+
                 <p>{notice}</p>
               </div>
             )}
 
             <button
               type="submit"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#b88b48] px-5 py-4 text-sm font-semibold text-[#1d160c] transition hover:bg-[#c99b59] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b88b48] sm:w-auto sm:min-w-64"
+              disabled={isLoadingPlans || Boolean(plansError) || !plan}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#b88b48] px-5 py-4 text-sm font-semibold text-[#1d160c] transition hover:bg-[#c99b59] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b88b48] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-64"
             >
-              Preview checkout submission
+              Preview checkout
               <ArrowRight size={17} />
             </button>
 
             <p className="text-xs leading-5 text-[var(--muted)]">
-              Preview only. This action does not charge money, submit a payment
-              request, upload a file or activate a membership.
+              Preview only. This action does not call a payment API,
+              transmit payment details, charge money, or activate a
+              membership.
             </p>
           </form>
 
-          <aside data-checkout-animate className="space-y-5 lg:sticky lg:top-8">
+          <aside
+            data-checkout-animate
+            className="space-y-5 lg:sticky lg:top-8"
+          >
             <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
               <div className="bg-[var(--dark-panel)] p-6 text-[var(--dark-text)] sm:p-7">
                 <div className="mb-4 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--dark-muted)]">
@@ -564,46 +636,82 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                   Order summary
                 </div>
 
-                <h2 className="text-2xl font-semibold">{plan.name}</h2>
-                <p className="mt-2 text-sm leading-6 text-[var(--dark-muted)]">
-                  {plan.description}
-                </p>
+                {plan ? (
+                  <>
+                    <h2 className="break-words text-2xl font-semibold">
+                      {plan.name}
+                    </h2>
 
-                <div className="mt-6 border-t border-white/10 pt-5">
-                  <p className="text-xs text-[var(--dark-muted)]">
-                    Illustrative price
-                  </p>
-                  <div className="mt-1 flex flex-wrap items-baseline gap-2">
-                    <span className="text-3xl font-semibold tracking-tight">
-                      {plan.price}
-                    </span>
-                    <span className="text-sm text-[var(--dark-muted)]">
-                      {plan.billing}
-                    </span>
+                    <p className="mt-2 text-sm leading-6 text-[var(--dark-muted)]">
+                      {plan.description}
+                    </p>
+
+                    <div className="mt-6 border-t border-white/10 pt-5">
+                      <p className="text-xs text-[var(--dark-muted)]">
+                        Current plan price
+                      </p>
+
+                      <div className="mt-1 flex flex-wrap items-baseline gap-2">
+                        <span className="break-words text-3xl font-semibold tracking-tight">
+                          {formatPrice(plan.price)}
+                        </span>
+
+                        <span className="text-sm text-[var(--dark-muted)]">
+                          {getBillingLabel(plan)}
+                        </span>
+                      </div>
+
+                      <p className="mt-2 text-xs text-[#d3ad70]">
+                        Database price · Preview only
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="py-4">
+                    <h2 className="text-lg font-semibold">
+                      {isLoadingPlans
+                        ? "Loading plan..."
+                        : "No plan selected"}
+                    </h2>
+
+                    <p className="mt-2 text-sm leading-6 text-[var(--dark-muted)]">
+                      {isLoadingPlans
+                        ? "Fetching current plan details."
+                        : "Choose an available active plan to view its price and features."}
+                    </p>
                   </div>
-                  <p className="mt-2 text-xs text-[#d3ad70]">
-                    Placeholder — not a confirmed charge
-                  </p>
-                </div>
+                )}
               </div>
 
               <div className="p-6 sm:p-7">
                 <h3 className="text-sm font-semibold">Plan includes</h3>
 
-                <ul className="mt-4 space-y-3">
-                  {plan.features.map((feature) => (
-                    <li
-                      key={feature}
-                      className="flex items-start gap-2.5 text-sm leading-5 text-[var(--muted)]"
-                    >
-                      <Check
-                        size={16}
-                        className="mt-0.5 shrink-0 text-[#b88b48]"
-                      />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
+                {plan ? (
+                  plan.features.length > 0 ? (
+                    <ul className="mt-4 space-y-3">
+                      {plan.features.map((feature, index) => (
+                        <li
+                          key={`${plan._id}-${index}`}
+                          className="flex items-start gap-2.5 text-sm leading-5 text-[var(--muted)]"
+                        >
+                          <Check
+                            size={16}
+                            className="mt-0.5 shrink-0 text-[#b88b48]"
+                          />
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
+                      No features have been added to this plan yet.
+                    </p>
+                  )
+                ) : (
+                  <p className="mt-4 text-sm leading-6 text-[var(--muted)]">
+                    Plan features will appear here when a plan is selected.
+                  </p>
+                )}
 
                 <div className="mt-6 border-t border-[var(--border)] pt-5">
                   <div className="flex items-start gap-3">
@@ -611,9 +719,11 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                       size={19}
                       className="mt-0.5 shrink-0 text-[#b88b48]"
                     />
+
                     <p className="text-xs leading-5 text-[var(--muted)]">
-                      Payment confirmation and membership activation will
-                      require server-side verification.
+                      Payment confirmation and membership activation
+                      require server-side verification. Neither is
+                      performed by this preview.
                     </p>
                   </div>
                 </div>
@@ -626,8 +736,12 @@ const [isSubmitting, setIsSubmitting] = useState(false);
                   size={19}
                   className="shrink-0 text-[#b88b48]"
                 />
+
                 <div>
-                  <p className="text-sm font-medium">Questions about a plan?</p>
+                  <p className="text-sm font-medium">
+                    Questions about a plan?
+                  </p>
+
                   <Link
                     href="/contact"
                     className="mt-1 inline-flex items-center gap-1 text-sm text-[#b88b48] hover:underline"
