@@ -3,7 +3,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
+
 import { useRouter } from "next/navigation";
+
 import {
   Activity,
   ArrowDownLeft,
@@ -15,6 +20,8 @@ import {
   ChevronDown,
   CreditCard,
   Download,
+
+  Printer,
   ExternalLink,
   House,
   LayoutDashboard,
@@ -37,6 +44,24 @@ import gsap from "gsap";
 
 type Section = "Overview" | "My Profile" | "My Membership" | "Payments" | "Settings";
 type PaymentStatus = "Completed" | "Pending" | "Failed";
+type PaymentRecord = {
+  id: string;
+  amount: number;
+  currency: string;
+  method: "bkash" | "nagad" | "bank" | "online";
+  status:
+    | "pending"
+    | "processing"
+    | "completed"
+    | "rejected"
+    | "failed"
+    | "refunded";
+  transactionId: string | null;
+  gatewayTransactionId: string | null;
+  membershipId: string | null;
+  planName: string;
+  createdAt: string;
+};
 
 type Profile = {
   name: string;
@@ -127,6 +152,9 @@ export default function DashboardPage() {
 const [authLoading, setAuthLoading] = useState(true);
 const [authUser, setAuthUser] = useState<AuthUser | null>(null);
 const [memberships, setMemberships] = useState<UserMembership[]>([]);
+const [payments, setPayments] = useState<PaymentRecord[]>([]);
+const [paymentLoading, setPaymentLoading] = useState(true);
+const [paymentError, setPaymentError] = useState("");
 const [membershipLoading, setMembershipLoading] = useState(true);
 const [membershipError, setMembershipError] = useState("");
 const [loggingOut, setLoggingOut] = useState(false);
@@ -144,6 +172,21 @@ const [loggingOut, setLoggingOut] = useState(false);
   const [notice, setNotice] = useState("");
   const [saved, setSaved] = useState(false);
   const [certificateOpen, setCertificateOpen] = useState(false);
+  const [certificateLoading, setCertificateLoading] = useState(false);
+const [certificateError, setCertificateError] = useState("");
+const [certificateData, setCertificateData] = useState<{
+  certificateId: string;
+  status: string;
+  issuedAt: string;
+  verificationUrl: string;
+  qrCode: string;
+  membership: {
+    membershipId: string;
+    plan: string;
+    startDate: string | null;
+    endDate: string | null;
+  };
+} | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const showNotice = useCallback((message: string) => {
@@ -272,6 +315,261 @@ const [loggingOut, setLoggingOut] = useState(false);
     cancelled = true;
   };
 }, [authUser, authLoading]);
+useEffect(() => {
+  if (authLoading || !authUser) return;
+
+  let cancelled = false;
+
+  async function loadPayments() {
+    setPaymentLoading(true);
+    setPaymentError("");
+
+    try {
+      const response = await fetch(`${API_URL}/api/payments/me`, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      const payload: unknown = await response.json();
+
+      if (typeof payload !== "object" || payload === null) {
+        throw new Error("Invalid payment response.");
+      }
+
+      const data = payload as {
+        success?: unknown;
+        payments?: unknown;
+        message?: unknown;
+      };
+
+      if (
+        !response.ok ||
+        data.success !== true ||
+        !Array.isArray(data.payments)
+      ) {
+        throw new Error(
+          typeof data.message === "string"
+            ? data.message
+            : "Unable to load payment history.",
+        );
+      }
+
+      if (!cancelled) {
+        setPayments(data.payments as PaymentRecord[]);
+      }
+    } catch (error) {
+      if (!cancelled) {
+        setPaymentError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load payment history.",
+        );
+      }
+    } finally {
+      if (!cancelled) {
+        setPaymentLoading(false);
+      }
+    }
+  }
+
+  void loadPayments();
+
+  return () => {
+    cancelled = true;
+  };
+}, [authUser, authLoading]);
+useEffect(() => {
+  if (authLoading || !authUser) return;
+
+  let cancelled = false;
+
+  async function loadPayments() {
+    setPaymentLoading(true);
+    setPaymentError("");
+
+    try {
+      const response = await fetch(`${API_URL}/api/payments/me`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || data.success !== true) {
+        throw new Error(data.message || "Unable to load payments.");
+      }
+
+      if (!cancelled) {
+        setPayments(data.payments);
+      }
+    } catch (error) {
+      if (!cancelled) {
+        setPaymentError(
+          error instanceof Error ? error.message : "Unable to load payments.",
+        );
+      }
+    } finally {
+      if (!cancelled) setPaymentLoading(false);
+    }
+  }
+
+  void loadPayments();
+
+  return () => {
+    cancelled = true;
+  };
+}, [authUser, authLoading]);
+const handleDownloadCertificatePDF = async () => {
+  
+  const certificateElement = document.getElementById(
+    "membership-certificate",
+  );
+
+  if (!certificateElement) {
+    showNotice("Certificate is not available.");
+    return;
+  }
+
+  try {
+    await document.fonts.ready;
+
+    const images = Array.from(
+      certificateElement.querySelectorAll("img"),
+    );
+
+    await Promise.all(
+      images.map(async (image) => {
+        if (!image.complete) {
+          await new Promise<void>((resolve) => {
+            image.onload = () => resolve();
+            image.onerror = () => resolve();
+          });
+        }
+      }),
+    );
+
+   const canvas = await html2canvas(certificateElement, {
+  scale: 3,
+  useCORS: true,
+  backgroundColor: "#ffffff",
+  logging: false,
+  onclone: (clonedDocument) => {
+    const clonedCertificate =
+      clonedDocument.getElementById("membership-certificate");
+
+    if (!clonedCertificate) return;
+
+    const elements = [
+      clonedCertificate,
+      ...Array.from(clonedCertificate.querySelectorAll("*")),
+    ];
+
+    elements.forEach((element) => {
+      const htmlElement = element as HTMLElement;
+
+      htmlElement.style.setProperty("color", "#29251f");
+      htmlElement.style.setProperty("background-color", "#ffffff");
+      htmlElement.style.setProperty("border-color", "#b89450");
+    });
+  },
+});
+
+    const imageData = canvas.toDataURL("image/png");
+
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+
+    const availableWidth = pageWidth - margin * 2;
+    const availableHeight = pageHeight - margin * 2;
+
+    const ratio = Math.min(
+      availableWidth / canvas.width,
+      availableHeight / canvas.height,
+    );
+
+    const width = canvas.width * ratio;
+    const height = canvas.height * ratio;
+
+    pdf.addImage(
+      imageData,
+      "PNG",
+      (pageWidth - width) / 2,
+      (pageHeight - height) / 2,
+      width,
+      height,
+    );
+
+    pdf.save(
+      `${certificateData?.certificateId || "Membrix-Certificate"}.pdf`,
+    );
+
+    showNotice("Certificate PDF downloaded successfully.");
+  } catch (error) {
+    console.error("Certificate PDF error:", error);
+    showNotice("Unable to download certificate PDF.");
+  }
+};
+const handleGenerateCertificate = async () => {
+  const activeMembership = memberships.find(
+    (membership) => membership.status === "active",
+  );
+
+  if (!activeMembership) {
+    setCertificateError(
+      "You need an active membership to generate a certificate.",
+    );
+    setCertificateData(null);
+    setCertificateOpen(true);
+    return;
+  }
+
+  setCertificateLoading(true);
+  setCertificateError("");
+  setCertificateData(null);
+  setCertificateOpen(true);
+
+  try {
+    const response = await fetch(
+      `${API_URL}/api/certificates/generate`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          membershipId: activeMembership.membershipId,
+        }),
+      },
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success || !data.certificate) {
+      throw new Error(
+        data.message || "Unable to generate certificate.",
+      );
+    }
+
+    setCertificateData(data.certificate);
+  } catch (error) {
+    setCertificateError(
+      error instanceof Error
+        ? error.message
+        : "Unable to generate certificate.",
+    );
+  } finally {
+    setCertificateLoading(false);
+  }
+};
 const handleLogout = async () => {
   if (loggingOut) return;
 
@@ -393,27 +691,34 @@ if (storedProfile) {
     setSearchQuery("");
   };
 const totalPaid = payments
-  .filter((payment) => payment.status === "Completed")
+  .filter((payment) => payment.status === "completed")
   .reduce((total, payment) => total + payment.amount, 0);
 
 const completedCount = payments.filter(
-  (payment) => payment.status === "Completed"
+  (payment) => payment.status === "completed"
 ).length;
 
 const pendingAmount = payments
-  .filter((payment) => payment.status === "Pending")
+  .filter((payment) =>
+    ["pending", "processing"].includes(payment.status),
+  )
   .reduce((total, payment) => total + payment.amount, 0);
- const filteredPayments = payments.filter((payment) => {
+
+const filteredPayments = payments.filter((payment) => {
   const query = searchQuery.trim().toLowerCase();
 
+  const statusLabel =
+    payment.status.charAt(0).toUpperCase() +
+    payment.status.slice(1);
+
   const matchesSearch =
-    `${payment.id} ${payment.description} ${payment.method} ${payment.status}`
+    `${payment.id} ${payment.transactionId ?? ""} ${payment.planName} ${payment.method} ${statusLabel}`
       .toLowerCase()
       .includes(query);
 
   const matchesStatus =
     paymentStatusFilter === "All" ||
-    payment.status === paymentStatusFilter;
+    statusLabel === paymentStatusFilter;
 
   return matchesSearch && matchesStatus;
 });
@@ -779,10 +1084,10 @@ const pendingAmount = payments
                             </span>
                             <div className="min-w-0">
                               <p className="truncate text-sm font-medium">
-                                {payment.description}
+                                {payment.planName}
                               </p>
                               <p className="mt-1 truncate text-xs text-[var(--muted-foreground)]">
-                                {payment.date}
+                                {new Date(payment.createdAt).toLocaleDateString("en-BD")}
                               </p>
                             </div>
                           </div>
@@ -791,7 +1096,15 @@ const pendingAmount = payments
                               {money(payment.amount)}
                             </p>
                             <div className="mt-1">
-                              <StatusBadge status={payment.status} />
+                              <StatusBadge
+  status={
+    payment.status === "completed"
+      ? "Completed"
+      : ["pending", "processing"].includes(payment.status)
+        ? "Pending"
+        : "Failed"
+  }
+/>
                             </div>
                           </div>
                         </div>
@@ -849,7 +1162,7 @@ const pendingAmount = payments
                     </button>
                  <button
   type="button"
-  onClick={() => setCertificateOpen(true)}
+ onClick={handleGenerateCertificate}
   className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--gold)] px-4 py-3 text-sm font-semibold text-black transition-opacity hover:opacity-90"
 >
   <FileBadge size={16} />
@@ -1392,41 +1705,35 @@ onClick={() => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--border)]">
+                        
                         {filteredPayments.map((payment) => (
                           <tr key={payment.id} className="transition-colors hover:bg-[var(--surface)]">
                             <td className="px-5 py-4 sm:px-6">
-                              <p className="text-sm font-medium">{payment.description}</p>
+                              <p className="text-sm font-medium">{payment.planName}</p>
                               <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
                                 {payment.id}
                               </p>
                             </td>
                             <td className="whitespace-nowrap px-5 py-4 text-xs text-[var(--muted-foreground)]">
-                              {payment.date}
+                              {new Date(payment.createdAt).toLocaleDateString("en-BD")}
                             </td>
-                            <td className="px-5 py-4 text-xs">{payment.method}</td>
+                            <td className="px-5 py-4 text-xs capitalize">
+  {payment.method === "online" ? "AamarPay" : payment.method}
+</td>
                             <td className="px-5 py-4">
-                              <StatusBadge status={payment.status} />
+                              <StatusBadge
+  status={
+    payment.status === "completed"
+      ? "Completed"
+      : ["pending", "processing"].includes(payment.status)
+        ? "Pending"
+        : "Failed"
+  }
+/>
                             </td>
-                            <td className="px-5 py-4 text-right text-sm font-semibold">
-                              {money(payment.amount)}
-                            </td>
-                            <td className="px-5 py-4 text-right">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  showNotice(
-                                    `Demo receipt selected for ${payment.id}. Real receipts require backend integration.`
-                                  )
-                                }
-                                aria-label={`View demo receipt for ${payment.id}`}
-                                className="rounded-lg border border-[var(--border)] p-2 transition-colors hover:bg-[var(--background)]"
-                              >
-                              <span className="flex items-center gap-2">
-  <Download size={15} />
-  <span className="text-xs font-medium">Demo receipt</span>
-</span>
-                              </button>
-                            </td>
+                           <td className="px-5 py-4 text-right text-xs text-[var(--muted-foreground)]">
+  —
+</td>
                           </tr>
                         ))}
                        {filteredPayments.length === 0 && (
@@ -1637,6 +1944,7 @@ disabled={loggingOut}
               </div>
             </footer>
           </div>
+
 {certificateOpen && (
   <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
     <section
@@ -1645,131 +1953,203 @@ disabled={loggingOut}
       aria-labelledby="membership-certificate-title"
       className="my-auto w-full max-w-4xl overflow-hidden rounded-2xl bg-[var(--dark-panel)] text-[var(--dark-text)] shadow-2xl"
     >
-      <div className="bg-[var(--dark-panel)] px-5 py-4 text-white sm:px-8">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-bold tracking-[0.3em] text-[var(--gold-bright)]">
-              MEMBRIX
-            </p>
-            <p className="mt-1 text-xs text-white/60">
-              Member workspace · Certificate preview
-            </p>
-          </div>
-          <ShieldCheck className="h-8 w-8 text-[var(--gold-bright)]" />
+      <div className="flex items-center justify-between gap-4 bg-[var(--dark-panel)] px-5 py-4 text-white sm:px-8">
+        <div>
+          <p className="text-xs font-bold tracking-[0.3em] text-[var(--gold-bright)]">
+            MEMBRIX
+          </p>
+          <p className="mt-1 text-xs text-white/60">
+            Member workspace · Membership certificate
+          </p>
         </div>
+        <ShieldCheck className="h-8 w-8 text-[var(--gold-bright)]" />
       </div>
 
       <div className="bg-[var(--surface)] p-3 text-[var(--foreground)] sm:p-6">
-        <div className="relative border-2 border-[var(--gold)] p-5 sm:p-9">
-          <div className="pointer-events-none absolute inset-2 border border-[var(--gold)]/20" />
-
-          <div className="relative text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border-2 border-[var(--gold)] text-[var(--dark-text)]">
-              <FileBadge size={25} />
-            </div>
-
-            <p className="mt-4 text-xs font-bold tracking-[0.35em] text-[var(--gold)]">
-              MEMBRIX MEMBERSHIP
+        {certificateLoading ? (
+          <div className="flex min-h-[350px] flex-col items-center justify-center gap-4">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-[var(--gold)]/20 border-t-[var(--gold)]" />
+            <p className="text-sm font-medium">
+              Generating your certificate...
             </p>
-
-            <h2
-              id="membership-certificate-title"
-              className="mt-3 text-2xl font-serif font-bold tracking-wide text-[var(--dark-text)] sm:text-4xl"
-            >
-              Certificate of Membership
-            </h2>
-
-            <div className="mx-auto mt-4 h-1 w-20 rounded-full bg-[var(--gold)]" />
-
-            <p className="mt-5 text-sm text-[var(--dark-muted)]">
-              This certificate is presented to
-            </p>
-
-            <h3 className="mt-2 break-words text-2xl font-semibold text-[var(--dark-text)] sm:text-3xl">
-              {profile.name || "Member Name"}
-            </h3>
-
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[var(--dark-muted)]">
-              In recognition of their membership and participation in the Membrix community.
-            </p>
-
-            <div className="mt-7 grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
-              <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
-                <p className="text-[10px] font-bold tracking-wider text-[var(--dark-muted)]">
-                  MEMBERSHIP ID
-                </p>
-                <p className="mt-1 text-sm font-semibold text-[var(--dark-text)]">
-                  MBX-DEMO-2048
-                </p>
-              </div>
-
-              <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
-                <p className="text-[10px] font-bold tracking-wider text-[var(--dark-muted)]">
-                  MEMBERSHIP TYPE
-                </p>
-                <p className="mt-1 text-sm font-semibold text-[var(--dark-text)]">
-                  Premium · Demo
-                </p>
-              </div>
-
-              <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
-                <p className="text-[10px] font-bold tracking-wider text-[var(--dark-muted)]">
-                  CERTIFICATE STATUS
-                </p>
-                <p className="mt-1 text-sm font-semibold text-[var(--gold)]">
-                  Sample Preview
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-7 flex flex-col items-center justify-between gap-4 border-t border-[var(--border)] pt-5 sm:flex-row">
-              <div className="text-center sm:text-left">
-                <p className="text-xs text-[var(--dark-muted)]">Certificate reference</p>
-                <p className="mt-1 text-sm font-semibold text-[var(--dark-text)]">
-                  MX-DEMO-001
-                </p>
-              </div>
-
-              <div className="text-center">
-                <div className="mx-auto w-36 border-b border-[var(--border)] pb-2 font-serif italic text-[var(--dark-text)]">
-                  Membrix
-                </div>
-                <p className="mt-2 text-xs text-[var(--dark-muted)]">
-                  Authorized signature · Demo
-                </p>
-              </div>
-            </div>
           </div>
-        </div>
-
-        <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
-          <p className="text-center text-xs leading-5 text-[var(--dark-muted)] sm:text-left">
-            Demo only — not an official or verified certificate.
-          </p>
-
-          <div className="flex flex-wrap justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="inline-flex items-center gap-2 rounded-xl bg-[var(--gold)] px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
-            >
-              <Download size={16} />
-              Print / Save PDF
-            </button>
-
+        ) : certificateError ? (
+          <div className="flex min-h-[300px] flex-col items-center justify-center text-center">
+            <ShieldCheck className="mb-4 h-12 w-12 text-[var(--gold)]" />
+            <h2 className="text-xl font-semibold">
+              Certificate unavailable
+            </h2>
+            <p className="mt-3 max-w-md text-sm text-[var(--muted-foreground)]">
+              {certificateError}
+            </p>
             <button
               type="button"
               onClick={() => setCertificateOpen(false)}
-              className="rounded-xl bg-[var(--dark-panel)] px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
+              className="mt-6 rounded-xl bg-[var(--gold)] px-5 py-2.5 text-sm font-semibold text-black"
             >
               Close
             </button>
           </div>
-        </div>
+        ) : certificateData ? (
+          <>
+            <div
+              id="membership-certificate"
+              className="relative border-2 border-[var(--gold)] bg-[var(--surface)] p-5 sm:p-9"
+            >
+              <div className="pointer-events-none absolute inset-2 border border-[var(--gold)]/20" />
+
+              <div className="relative text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border-2 border-[var(--gold)] text-[var(--gold)]">
+                  <FileBadge size={25} />
+                </div>
+
+                <p className="mt-4 text-xs font-bold tracking-[0.35em] text-[var(--gold)]">
+                  MEMBRIX MEMBERSHIP
+                </p>
+
+                <h2
+                  id="membership-certificate-title"
+                  className="mt-3 font-serif text-2xl font-bold tracking-wide text-[var(--foreground)] sm:text-4xl"
+                >
+                  Certificate of Membership
+                </h2>
+
+                <div className="mx-auto mt-4 h-1 w-20 rounded-full bg-[var(--gold)]" />
+
+                <p className="mt-5 text-sm text-[var(--muted-foreground)]">
+                  This certificate is presented to
+                </p>
+
+                <h3 className="mt-2 break-words text-2xl font-semibold text-[var(--foreground)] sm:text-3xl">
+                  {profile.name || "Membrix Member"}
+                </h3>
+
+                <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[var(--muted-foreground)]">
+                  In recognition of their membership and participation in the Membrix community.
+                </p>
+
+                <div className="mt-7 grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
+                  <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
+                    <p className="text-[10px] font-bold tracking-wider text-[var(--muted-foreground)]">
+                      MEMBERSHIP ID
+                    </p>
+                    <p className="mt-1 break-all text-sm font-semibold text-[var(--foreground)]">
+                      {certificateData.membership.membershipId}
+                    </p>
+                  </div>
+
+                  <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
+                    <p className="text-[10px] font-bold tracking-wider text-[var(--muted-foreground)]">
+                      MEMBERSHIP TYPE
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-[var(--foreground)]">
+                      {certificateData.membership.plan}
+                    </p>
+                  </div>
+
+                  <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
+                    <p className="text-[10px] font-bold tracking-wider text-[var(--muted-foreground)]">
+                      CERTIFICATE STATUS
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-emerald-600">
+                      {certificateData.status.toUpperCase()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-7 flex flex-col items-center justify-between gap-6 border-t border-[var(--border)] pt-5 sm:flex-row">
+                  <div className="text-center sm:text-left">
+                    <p className="text-xs text-[var(--muted-foreground)]">
+                      Certificate reference
+                    </p>
+                    <p className="mt-1 break-all text-sm font-semibold text-[var(--foreground)]">
+                      {certificateData.certificateId}
+                    </p>
+                    <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                      Issued:{" "}
+                      {new Date(certificateData.issuedAt).toLocaleDateString("en-GB")}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col items-center">
+                    <div className="rounded-xl border border-[var(--gold)]/30 bg-white p-2">
+                    <Image
+  src={certificateData.qrCode}
+  alt="Certificate verification QR code"
+  width={112}
+  height={112}
+  unoptimized
+  className="h-28 w-28"
+/>
+                    </div>
+                    <p className="mt-2 text-[10px] font-semibold tracking-wider text-[var(--muted-foreground)]">
+                      SCAN TO VERIFY
+                    </p>
+                  </div>
+
+                  <div className="text-center">
+                    <div className="mx-auto w-32 border-b border-[var(--border)] pb-2 font-serif italic text-[var(--foreground)]">
+                      Membrix
+                    </div>
+                    <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                      Authorized signature
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p className="mt-4 text-center text-xs text-[var(--muted-foreground)]">
+              Verify this certificate by scanning the QR code.
+            </p>
+
+
+
+ <div className="mt-6 flex flex-col gap-4 border-t border-[var(--border)] pt-5 print:hidden">
+  <div>
+    <p className="text-sm font-semibold text-[var(--foreground)]">
+      Certificate actions
+    </p>
+    <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+      Print your certificate or download a PDF copy.
+    </p>
+  </div>
+
+  <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+    <button
+      type="button"
+      onClick={() => window.print()}
+      className="inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] px-6 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+    >
+      <Printer size={17} />
+      Print Certificate
+    </button>
+
+    <button
+      type="button"
+      onClick={handleDownloadCertificatePDF}
+      className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--gold)] px-6 py-3 text-sm font-semibold text-black transition hover:opacity-90"
+    >
+      <Download size={17} />
+      Download PDF
+    </button>
+
+    <button
+      type="button"
+      onClick={() => setCertificateOpen(false)}
+      className="rounded-xl border border-[var(--border)] px-6 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
+    >
+      Close
+    </button>
+  </div>
+</div>
+          </>
+        ) : null}
       </div>
     </section>
   </div>
 )}
+
         </main>
       </div>
     </div>

@@ -13,7 +13,8 @@ import {
   ChevronRight,
   LayoutDashboard,
   LogOut,
-  Menu,
+   Menu,
+  Power,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -132,7 +133,11 @@ export default function AdminMembersPage() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [error, setError] = useState("");
+const [selectedMember, setSelectedMember] =
+  useState<AdminMember | null>(null);
 
+const [updatingMemberId, setUpdatingMemberId] =
+  useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
 
@@ -326,7 +331,56 @@ export default function AdminMembersPage() {
     setLoading(true);
     setReloadKey((current) => current + 1);
   }
+  async function handleMemberStatusChange() {
+    if (!selectedMember || updatingMemberId) return;
 
+    const member = selectedMember;
+    const nextIsActive = !member.isActive;
+
+    setUpdatingMemberId(member.id);
+    setError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/admin/members/${encodeURIComponent(member.id)}/status`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            isActive: nextIsActive,
+          }),
+        },
+      );
+
+      const result = await response.json();
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message || "Unable to update member account.",
+        );
+      }
+
+      setSelectedMember(null);
+      setLoading(true);
+      setReloadKey((current) => current + 1);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to update member account.",
+      );
+    } finally {
+      setUpdatingMemberId(null);
+    }
+  }
   async function handleLogout() {
     if (loggingOut) {
       return;
@@ -814,7 +868,7 @@ export default function AdminMembersPage() {
               ) : (
                 <>
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[850px] text-left text-sm">
+                    <table className="w-full min-w-[1000px] text-left text-sm">
                       <thead className="border-b border-[var(--border)] bg-[var(--background)]/70 text-[10px] font-semibold uppercase tracking-[0.13em] text-[var(--muted)]">
                         <tr>
                           <th className="px-5 py-4 font-medium sm:px-6">
@@ -836,6 +890,9 @@ export default function AdminMembersPage() {
                           <th className="px-5 py-4 font-medium">
                             Joined
                           </th>
+                          <th className="px-5 py-4 font-medium">
+  Actions
+</th>
                         </tr>
                       </thead>
 
@@ -903,6 +960,21 @@ export default function AdminMembersPage() {
                             <td className="whitespace-nowrap px-5 py-4 text-xs text-[var(--muted)]">
                               {formatDate(member.createdAt)}
                             </td>
+                            <td className="px-5 py-4">
+  <button
+    type="button"
+    onClick={() => setSelectedMember(member)}
+    disabled={updatingMemberId === member.id}
+    className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-semibold transition disabled:opacity-50 ${
+      member.isActive
+        ? "border-red-500/20 text-red-600 hover:bg-red-500/10"
+        : "border-emerald-500/20 text-emerald-600 hover:bg-emerald-500/10"
+    }`}
+  >
+    <Power size={14} />
+    {member.isActive ? "Suspend" : "Reactivate"}
+  </button>
+</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1075,6 +1147,85 @@ export default function AdminMembersPage() {
               </button>
             </div>
           </aside>
+        </div>
+      )}
+            {selectedMember && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm"
+          onClick={() => {
+            if (!updatingMemberId) setSelectedMember(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="member-status-title"
+            className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#d6b878]/15 text-[#a98843]">
+              <ShieldCheck size={23} />
+            </div>
+
+            <h2 id="member-status-title" className="mt-5 text-lg font-semibold">
+              {selectedMember.isActive
+                ? "Suspend this member?"
+                : "Reactivate this member?"}
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+              You are about to{" "}
+              {selectedMember.isActive ? "suspend" : "reactivate"}{" "}
+              <span className="font-semibold text-[var(--foreground)]">
+                {selectedMember.name}
+              </span>{" "}
+              ({selectedMember.email}).
+            </p>
+
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3.5">
+              <p className="text-xs leading-5 text-[var(--muted)]">
+                {selectedMember.isActive
+                  ? "The member will lose access to protected account features. Existing memberships and payment history will remain unchanged."
+                  : "The member will regain account access. Existing membership and payment records will remain unchanged."}
+              </p>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                disabled={Boolean(updatingMemberId)}
+                onClick={() => setSelectedMember(null)}
+                className="h-10 rounded-xl border border-[var(--border)] px-4 text-sm font-medium transition hover:bg-[var(--background)] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(updatingMemberId)}
+                onClick={() => void handleMemberStatusChange()}
+                className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition disabled:opacity-60 ${
+                  selectedMember.isActive
+                    ? "bg-red-600 hover:bg-red-700"
+                    : "bg-emerald-600 hover:bg-emerald-700"
+                }`}
+              >
+                {updatingMemberId ? (
+                  <>
+                    <RefreshCw size={15} className="animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  <>
+                    <Power size={15} />
+                    {selectedMember.isActive
+                      ? "Confirm suspend"
+                      : "Confirm reactivate"}
+                  </>
+                )}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </main>

@@ -1,7 +1,13 @@
 
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import gsap from "gsap";
@@ -11,7 +17,9 @@ import {
   Building2,
   Check,
   CheckCircle2,
+  Clock3,
   CreditCard,
+  LoaderCircle,
   LockKeyhole,
   ShieldCheck,
   Sparkles,
@@ -24,6 +32,7 @@ const API_URL = (
 ).replace(/\/+$/, "");
 
 type PaymentMethod = "bkash" | "nagad" | "bank" | "online";
+type NoticeType = "success" | "error" | "info";
 
 type MembershipPlan = {
   _id: string;
@@ -37,12 +46,32 @@ type MembershipPlan = {
   isActive: boolean;
 };
 
-type PlansResponse = {
+type ApiResponse = {
   success: boolean;
   message?: string;
   data?: {
     plans?: MembershipPlan[];
+    paymentId?: string;
+    membershipId?: string;
+    status?: string;
   };
+  payment?: {
+    id?: string;
+    membershipId?: string;
+    transactionId?: string;
+    status?: string;
+    amount?: number;
+    currency?: string;
+    method?: string;
+  };
+  paymentUrl?: string;
+  transactionId?: string;
+};
+
+type SubmissionDetails = {
+  transactionId: string;
+  paymentId?: string;
+  membershipId?: string;
 };
 
 const paymentMethods: {
@@ -72,7 +101,7 @@ const paymentMethods: {
   {
     id: "online",
     name: "Online gateway",
-    description: "Online payment integration",
+    description: "Secure AamarPay checkout",
     icon: CreditCard,
   },
 ];
@@ -94,6 +123,33 @@ function getBillingLabel(plan: MembershipPlan) {
   return "per year";
 }
 
+async function readApiResponse(
+  response: Response,
+): Promise<ApiResponse> {
+  try {
+    const result: unknown = await response.json();
+
+    if (
+      !result ||
+      typeof result !== "object" ||
+      !("success" in result) ||
+      typeof result.success !== "boolean"
+    ) {
+      return {
+        success: false,
+        message: "The server returned an unexpected response.",
+      };
+    }
+
+    return result as ApiResponse;
+  } catch {
+    return {
+      success: false,
+      message: "The server returned an invalid response. Please try again.",
+    };
+  }
+}
+
 function CheckoutContent() {
   const searchParams = useSearchParams();
   const pageRef = useRef<HTMLElement>(null);
@@ -104,30 +160,33 @@ function CheckoutContent() {
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [selectedPlanSlug, setSelectedPlanSlug] =
     useState(requestedPlan);
+
   const [isLoadingPlans, setIsLoadingPlans] = useState(true);
   const [plansError, setPlansError] = useState("");
 
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentMethod>("bkash");
+
   const [transactionId, setTransactionId] = useState("");
   const [payerNumber, setPayerNumber] = useState("");
+
   const [notice, setNotice] = useState("");
-  const [noticeType, setNoticeType] = useState<"info" | "error">(
-    "info",
-  );
+  const [noticeType, setNoticeType] = useState<NoticeType>("info");
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionDetails, setSubmissionDetails] =
+    useState<SubmissionDetails | null>(null);
 
   const effectivePlanSlug =
-    requestedPlan ||
-    selectedPlanSlug ||
-    (plans.length > 0 ? plans[0].slug : "");
+    selectedPlanSlug || plans[0]?.slug || "";
 
-  const selectedPlan = plans.find(
-    (plan) => plan.slug === effectivePlanSlug
+  const plan = plans.find(
+    (item) => item.slug === effectivePlanSlug,
   );
 
   const isManualPayment = paymentMethod !== "online";
 
-  // Load active membership plans from the existing public API.
+  // Load active membership plans from the backend.
   useEffect(() => {
     const controller = new AbortController();
 
@@ -142,7 +201,7 @@ function CheckoutContent() {
           signal: controller.signal,
         });
 
-        const result = (await response.json()) as PlansResponse;
+        const result = await readApiResponse(response);
 
         if (!response.ok || !result.success) {
           throw new Error(
@@ -151,7 +210,9 @@ function CheckoutContent() {
         }
 
         if (!Array.isArray(result.data?.plans)) {
-          throw new Error("The plans response has an unexpected format.");
+          throw new Error(
+            "The plans response has an unexpected format.",
+          );
         }
 
         const activePlans = result.data.plans.filter(
@@ -162,6 +223,7 @@ function CheckoutContent() {
             typeof item.slug === "string" &&
             item.slug.length > 0 &&
             typeof item.description === "string" &&
+            typeof item.price === "number" &&
             Number.isFinite(item.price) &&
             item.price >= 0 &&
             (item.billingType === "yearly" ||
@@ -171,6 +233,14 @@ function CheckoutContent() {
         );
 
         setPlans(activePlans);
+
+        setSelectedPlanSlug((current) => {
+          if (current) {
+            return current;
+          }
+
+          return activePlans[0]?.slug || "";
+        });
       } catch (error) {
         if (controller.signal.aborted) return;
 
@@ -192,16 +262,12 @@ function CheckoutContent() {
     return () => controller.abort();
   }, []);
 
-  // Follow the URL when the requested plan changes.
-const plan = plans.find(
-  (item) => item.slug === effectivePlanSlug
-);
-
-  // Animate page sections when the checkout renders.
+  // GSAP checkout page animations.
   useEffect(() => {
     if (!pageRef.current) return;
 
     const root = pageRef.current;
+
     const prefersReducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
@@ -222,21 +288,184 @@ const plan = plans.find(
     return () => ctx.revert();
   }, []);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function showNotice(type: NoticeType, message: string) {
+    setNoticeType(type);
+    setNotice(message);
+  }
+
+  function handlePlanChange(slug: string) {
+    setSelectedPlanSlug(slug);
+    setNotice("");
+    setSubmissionDetails(null);
+  }
+
+  function handlePaymentMethodChange(method: PaymentMethod) {
+    setPaymentMethod(method);
+    setNotice("");
+    setSubmissionDetails(null);
+  }
+
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
 
+    if (isSubmitting) return;
+
     if (isLoadingPlans || plansError || !plan) {
-      setNoticeType("error");
-      setNotice("Please select an available membership plan first.");
+      showNotice(
+        "error",
+        "Please select an available membership plan first.",
+      );
       return;
     }
 
-    // This page is explicitly in preview mode.
-    // No payment endpoint is called and no payment data is transmitted.
-    setNoticeType("info");
-    setNotice(
-      `Checkout preview ready for ${plan.name} (${formatPrice(plan.price)}). No payment has been submitted. Payment processing must be enabled before you can pay.`,
-    );
+    if (!plan.isActive) {
+      showNotice(
+        "error",
+        "This membership plan is no longer available.",
+      );
+      return;
+    }
+
+    const cleanTransactionId = transactionId.trim();
+    const cleanPayerNumber = payerNumber.trim();
+
+    if (isManualPayment) {
+      if (
+        cleanTransactionId.length < 3 ||
+        cleanTransactionId.length > 120
+      ) {
+        showNotice(
+          "error",
+          "Please enter a valid transaction ID (3–120 characters).",
+        );
+        return;
+      }
+
+      if (cleanPayerNumber.length > 30) {
+        showNotice(
+          "error",
+          "Payer number must not exceed 30 characters.",
+        );
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    setNotice("");
+    setSubmissionDetails(null);
+
+    try {
+      // AamarPay online payment initialization.
+      if (paymentMethod === "online") {
+        const response = await fetch(
+          `${API_URL}/api/payments/aamarpay/initiate`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              planSlug: plan.slug,
+            }),
+          },
+        );
+
+        const result = await readApiResponse(response);
+
+        if (!response.ok || !result.success) {
+          throw new Error(
+            result.message ||
+              "Unable to initialize online payment. Please try again.",
+          );
+        }
+
+        if (
+          typeof result.paymentUrl !== "string" ||
+          !result.paymentUrl
+        ) {
+          throw new Error(
+            "The payment gateway did not return a valid payment URL.",
+          );
+        }
+
+        let paymentUrl: URL;
+
+        try {
+          paymentUrl = new URL(result.paymentUrl);
+        } catch {
+          throw new Error("The payment gateway URL is invalid.");
+        }
+
+        // Only allow the configured AamarPay sandbox hostname.
+        if (
+          paymentUrl.protocol !== "https:" ||
+          paymentUrl.hostname !== "sandbox.aamarpay.com"
+        ) {
+          throw new Error(
+            "The payment gateway URL is not an approved sandbox address.",
+          );
+        }
+
+        window.location.assign(paymentUrl.toString());
+        return;
+      }
+
+      // Manual bKash, Nagad or bank transfer submission.
+      const response = await fetch(
+        `${API_URL}/api/payments/manual/submit`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            planSlug: plan.slug,
+            method: paymentMethod,
+            transactionId: cleanTransactionId,
+            payerNumber: cleanPayerNumber,
+          }),
+        },
+      );
+
+      const result = await readApiResponse(response);
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message ||
+            "Unable to submit your payment. Please try again.",
+        );
+      }
+
+     setSubmissionDetails({
+  transactionId:
+    result.payment?.transactionId || transactionId.trim(),
+  paymentId: result.payment?.id || result.data?.paymentId,
+  membershipId:
+    result.payment?.membershipId || result.data?.membershipId,
+});
+
+      setTransactionId("");
+      setPayerNumber("");
+
+      showNotice(
+        "success",
+        result.message ||
+          "Your payment information has been submitted successfully. Your membership will remain pending until an administrator verifies your payment.",
+      );
+    } catch (error) {
+      showNotice(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -244,6 +473,7 @@ const plan = plans.find(
       ref={pageRef}
       className="min-h-screen bg-[var(--background)] text-[var(--foreground)]"
     >
+      {/* Header */}
       <header className="border-b border-[var(--border)]">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 sm:px-8">
           <Link href="/" className="inline-flex items-center gap-3">
@@ -261,17 +491,20 @@ const plan = plans.find(
             className="inline-flex items-center gap-2 text-sm text-[var(--muted)] transition hover:text-[var(--foreground)]"
           >
             <ArrowLeft size={16} />
-            <span className="hidden sm:inline">Membership plans</span>
+            <span className="hidden sm:inline">
+              Membership plans
+            </span>
             <span className="sm:hidden">Plans</span>
           </Link>
         </div>
       </header>
 
       <section className="mx-auto max-w-7xl px-5 py-10 sm:px-8 sm:py-14">
+        {/* Page introduction */}
         <div data-checkout-animate className="mb-9 max-w-2xl">
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#b88b48]/30 bg-[#b88b48]/10 px-3 py-1.5 text-xs font-medium text-[#b88b48]">
             <LockKeyhole size={14} />
-            Membership checkout preview
+            Secure membership checkout
           </div>
 
           <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
@@ -280,11 +513,12 @@ const plan = plans.find(
           </h1>
 
           <p className="mt-4 max-w-xl text-sm leading-7 text-[var(--muted)] sm:text-base">
-            Choose an active membership plan and review its current
-            price and benefits from Membrix.
+            Select your membership plan and preferred payment method
+            to continue your Membrix registration.
           </p>
         </div>
 
+        {/* Payment security notice */}
         <div className="mb-8 flex items-start gap-3 rounded-2xl border border-[#b88b48]/30 bg-[#b88b48]/10 p-4 sm:p-5">
           <ShieldCheck
             size={21}
@@ -293,19 +527,25 @@ const plan = plans.find(
 
           <div>
             <p className="text-sm font-semibold">
-              Preview mode — no payment will be taken
+              Secure payment processing
             </p>
 
             <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-              Prices and plan details are loaded from the membership
-              database. Payment submission is disabled on this preview
-              page. Do not send money based on these payment options.
+              Online payments are currently configured for AamarPay
+              sandbox testing. Manual payments require administrator
+              verification before membership activation. Do not send
+              money until official payment instructions are provided.
             </p>
           </div>
         </div>
 
         <div className="grid items-start gap-8 lg:grid-cols-[1fr_360px]">
-          <form onSubmit={handleSubmit} className="min-w-0 space-y-8">
+          {/* Checkout form */}
+          <form
+            onSubmit={handleSubmit}
+            className="min-w-0 space-y-8"
+          >
+            {/* Membership selection */}
             <section
               data-checkout-animate
               className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7"
@@ -321,7 +561,7 @@ const plan = plans.find(
                   </h2>
 
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    Choose an active plan to review its details.
+                    Choose an active plan to continue.
                   </p>
                 </div>
               </div>
@@ -331,7 +571,13 @@ const plan = plans.find(
                   className="rounded-2xl border border-[var(--border)] p-6 text-sm text-[var(--muted)]"
                   role="status"
                 >
-                  Loading membership plans...
+                  <span className="inline-flex items-center gap-2">
+                    <LoaderCircle
+                      size={16}
+                      className="animate-spin"
+                    />
+                    Loading membership plans...
+                  </span>
                 </div>
               ) : plansError ? (
                 <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5">
@@ -367,18 +613,19 @@ const plan = plans.find(
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {plans.map((item) => {
-                      const isSelected = selectedPlanSlug === item.slug;
+                      const isSelected =
+                        effectivePlanSlug === item.slug;
 
                       return (
                         <button
                           key={item._id}
                           type="button"
-                          onClick={() => {
-                            setSelectedPlanSlug(item.slug);
-                            setNotice("");
-                          }}
+                          disabled={isSubmitting}
+                          onClick={() =>
+                            handlePlanChange(item.slug)
+                          }
                           aria-pressed={isSelected}
-                          className={`relative rounded-2xl border p-4 text-left transition ${
+                          className={`relative rounded-2xl border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
                             isSelected
                               ? "border-[#b88b48] bg-[#b88b48]/10"
                               : "border-[var(--border)] hover:border-[#b88b48]/60"
@@ -403,7 +650,7 @@ const plan = plans.find(
                           </span>
 
                           <span className="mt-3 block text-[11px] leading-5 text-[#b88b48]">
-                            Database price
+                            Current database price
                           </span>
                         </button>
                       );
@@ -424,6 +671,7 @@ const plan = plans.find(
               )}
             </section>
 
+            {/* Payment method */}
             <section
               data-checkout-animate
               className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-7"
@@ -439,7 +687,7 @@ const plan = plans.find(
                   </h2>
 
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    Preview the payment options planned for Membrix.
+                    Select how you want to pay for your membership.
                   </p>
                 </div>
               </div>
@@ -453,19 +701,22 @@ const plan = plans.find(
                     <button
                       key={method.id}
                       type="button"
-                      onClick={() => {
-                        setPaymentMethod(method.id);
-                        setNotice("");
-                      }}
+                      disabled={isSubmitting}
+                      onClick={() =>
+                        handlePaymentMethodChange(method.id)
+                      }
                       aria-pressed={isSelected}
-                      className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition ${
+                      className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
                         isSelected
                           ? "border-[#b88b48] bg-[#b88b48]/10"
                           : "border-[var(--border)] hover:border-[#b88b48]/60"
                       }`}
                     >
                       <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-alt)]">
-                        <Icon size={20} className="text-[#b88b48]" />
+                        <Icon
+                          size={20}
+                          className="text-[#b88b48]"
+                        />
                       </span>
 
                       <span className="min-w-0 flex-1">
@@ -492,17 +743,19 @@ const plan = plans.find(
                 })}
               </div>
 
+              {/* Manual payment fields */}
               {isManualPayment ? (
                 <div className="mt-6 space-y-5 border-t border-[var(--border)] pt-6">
                   <div>
                     <h3 className="text-sm font-semibold">
-                      Manual payment preview
+                      Manual payment details
                     </h3>
 
                     <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-                      Payment instructions and recipient accounts have
-                      not been enabled. The fields below are for UI
-                      preview only; do not enter real payment information.
+                      Submit your transaction reference for
+                      administrator review. Official recipient account
+                      instructions must be provided by Membrix before
+                      you transfer any money.
                     </p>
                   </div>
 
@@ -510,8 +763,8 @@ const plan = plans.find(
                     <label className="block">
                       <span className="mb-2 block text-sm font-medium">
                         Transaction ID
-                        <span className="ml-1 text-xs font-normal text-[var(--muted)]">
-                          (preview only)
+                        <span className="ml-1 text-xs text-red-500">
+                          *
                         </span>
                       </span>
 
@@ -520,19 +773,23 @@ const plan = plans.find(
                         onChange={(event) => {
                           setTransactionId(event.target.value);
                           setNotice("");
+                          setSubmissionDetails(null);
                         }}
+                        disabled={isSubmitting}
+                        required
+                        minLength={3}
                         maxLength={120}
-                        placeholder="Example reference"
+                        placeholder="Enter your transaction ID"
                         autoComplete="off"
-                        className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus:border-[#b88b48] focus:ring-2 focus:ring-[#b88b48]/15"
+                        className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus:border-[#b88b48] focus:ring-2 focus:ring-[#b88b48]/15 disabled:opacity-60"
                       />
                     </label>
 
                     <label className="block">
                       <span className="mb-2 block text-sm font-medium">
                         Payer number
-                        <span className="ml-1 text-xs font-normal text-[var(--muted)]">
-                          (preview only)
+                        <span className="ml-1 text-xs text-[var(--muted)]">
+                          (optional)
                         </span>
                       </span>
 
@@ -541,27 +798,41 @@ const plan = plans.find(
                         onChange={(event) => {
                           setPayerNumber(event.target.value);
                           setNotice("");
+                          setSubmissionDetails(null);
                         }}
+                        disabled={isSubmitting}
                         maxLength={30}
                         placeholder="Example: 01XXXXXXXXX"
-                        autoComplete="off"
-                        className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus:border-[#b88b48] focus:ring-2 focus:ring-[#b88b48]/15"
+                        autoComplete="tel"
+                        className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus:border-[#b88b48] focus:ring-2 focus:ring-[#b88b48]/15 disabled:opacity-60"
                       />
                     </label>
                   </div>
 
-                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)]/30 p-4">
-                    <span className="block text-sm font-semibold">
-                      Payment evidence
-                    </span>
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
+                    <div className="flex items-start gap-3">
+                      <ShieldCheck
+                        size={19}
+                        className="mt-0.5 shrink-0 text-[#b88b48]"
+                      />
 
-                    <p className="mt-1.5 text-xs leading-5 text-[var(--muted)]">
-                      File uploads and payment verification are not
-                      enabled in preview mode.
-                    </p>
+                      <div>
+                        <p className="text-sm font-semibold">
+                          Payment account instructions
+                        </p>
+
+                        <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+                          Recipient account details have not yet been
+                          configured in this checkout. Do not transfer
+                          funds until the official Membrix payment
+                          instructions are available.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : (
+                /* Online gateway information */
                 <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
                   <div className="flex items-start gap-3">
                     <CreditCard
@@ -571,37 +842,52 @@ const plan = plans.find(
 
                     <div>
                       <h3 className="text-sm font-semibold">
-                        Online gateway preview
+                        AamarPay online checkout
                       </h3>
 
                       <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-                        The payment gateway is not enabled on this
-                        preview page. No payment session will be
-                        created, and no card or banking details are
-                        required.
+                        You will be redirected to the AamarPay sandbox
+                        payment page. The backend will verify the
+                        transaction before activating your membership.
                       </p>
+
+                      <span className="mt-3 inline-flex items-center gap-2 rounded-full border border-[#b88b48]/30 bg-[#b88b48]/10 px-3 py-1.5 text-xs font-medium text-[#b88b48]">
+                        <LockKeyhole size={13} />
+                        Sandbox testing mode
+                      </span>
                     </div>
                   </div>
                 </div>
               )}
             </section>
 
+            {/* Submission notice */}
             {notice && (
               <div
-                role="status"
+                role={noticeType === "error" ? "alert" : "status"}
                 aria-live="polite"
                 className={`flex items-start gap-3 rounded-2xl border p-4 text-sm leading-6 ${
                   noticeType === "error"
                     ? "border-red-500/30 bg-red-500/5 text-red-600 dark:text-red-300"
-                    : "border-[#b88b48]/30 bg-[#b88b48]/10 text-[var(--foreground)]"
+                    : noticeType === "success"
+                      ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
+                      : "border-[#b88b48]/30 bg-[#b88b48]/10 text-[var(--foreground)]"
                 }`}
               >
                 {noticeType === "error" ? (
-                  <X size={19} className="mt-0.5 shrink-0" />
-                ) : (
+                  <X
+                    size={19}
+                    className="mt-0.5 shrink-0"
+                  />
+                ) : noticeType === "success" ? (
                   <CheckCircle2
                     size={19}
-                    className="mt-0.5 shrink-0 text-[#b88b48]"
+                    className="mt-0.5 shrink-0"
+                  />
+                ) : (
+                  <ShieldCheck
+                    size={19}
+                    className="mt-0.5 shrink-0"
                   />
                 )}
 
@@ -609,22 +895,119 @@ const plan = plans.find(
               </div>
             )}
 
+            {/* Manual payment confirmation */}
+            {submissionDetails && (
+              <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600">
+                    <Clock3 size={20} />
+                  </span>
+
+                  <div>
+                    <h3 className="text-sm font-semibold">
+                      Payment submitted successfully
+                    </h3>
+
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      <span className="font-semibold text-amber-600">
+                        Pending admin review
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 space-y-3 border-t border-emerald-500/20 pt-4 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[var(--muted)]">
+                      Transaction ID
+                    </span>
+
+                    <span className="break-all text-right font-medium">
+                      {submissionDetails.transactionId}
+                    </span>
+                  </div>
+
+                  {submissionDetails.paymentId && (
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[var(--muted)]">
+                        Payment reference
+                      </span>
+
+                      <span className="break-all text-right font-medium">
+                        {submissionDetails.paymentId}
+                      </span>
+                    </div>
+                  )}
+
+                  {submissionDetails.membershipId && (
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[var(--muted)]">
+                        Membership reference
+                      </span>
+
+                      <span className="break-all text-right font-medium">
+                        {submissionDetails.membershipId}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <p className="mt-4 text-xs leading-5 text-[var(--muted)]">
+                  Your membership is not active yet. It will be
+                  activated only after the administrator approves
+                  the submitted payment.
+                </p>
+
+                <Link
+                  href="/dashboard"
+                  className="mt-5 inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 px-4 py-2.5 text-sm font-medium transition hover:bg-emerald-500/10"
+                >
+                  Go to dashboard
+                  <ArrowRight size={15} />
+                </Link>
+              </div>
+            )}
+
+            {/* Submit button */}
             <button
               type="submit"
-              disabled={isLoadingPlans || Boolean(plansError) || !plan}
+              disabled={
+                isLoadingPlans ||
+                Boolean(plansError) ||
+                !plan ||
+                isSubmitting
+              }
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#b88b48] px-5 py-4 text-sm font-semibold text-[#1d160c] transition hover:bg-[#c99b59] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b88b48] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-64"
             >
-              Preview checkout
-              <ArrowRight size={17} />
+              {isSubmitting ? (
+                <>
+                  <LoaderCircle
+                    size={17}
+                    className="animate-spin"
+                  />
+                  {paymentMethod === "online"
+                    ? "Connecting to gateway..."
+                    : "Submitting payment..."}
+                </>
+              ) : (
+                <>
+                  {paymentMethod === "online"
+                    ? "Continue to AamarPay"
+                    : "Submit for admin review"}
+
+                  <ArrowRight size={17} />
+                </>
+              )}
             </button>
 
             <p className="text-xs leading-5 text-[var(--muted)]">
-              Preview only. This action does not call a payment API,
-              transmit payment details, charge money, or activate a
-              membership.
+              {paymentMethod === "online"
+                ? "You will continue to the AamarPay sandbox. Membership activation requires successful server-side payment verification."
+                : "Your payment submission will remain pending until an administrator verifies and approves it."}
             </p>
           </form>
 
+          {/* Order summary */}
           <aside
             data-checkout-animate
             className="space-y-5 lg:sticky lg:top-8"
@@ -632,7 +1015,10 @@ const plan = plans.find(
             <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
               <div className="bg-[var(--dark-panel)] p-6 text-[var(--dark-text)] sm:p-7">
                 <div className="mb-4 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--dark-muted)]">
-                  <Sparkles size={14} className="text-[#d3ad70]" />
+                  <Sparkles
+                    size={14}
+                    className="text-[#d3ad70]"
+                  />
                   Order summary
                 </div>
 
@@ -662,7 +1048,7 @@ const plan = plans.find(
                       </div>
 
                       <p className="mt-2 text-xs text-[#d3ad70]">
-                        Database price · Preview only
+                        Current database price
                       </p>
                     </div>
                   </>
@@ -684,7 +1070,9 @@ const plan = plans.find(
               </div>
 
               <div className="p-6 sm:p-7">
-                <h3 className="text-sm font-semibold">Plan includes</h3>
+                <h3 className="text-sm font-semibold">
+                  Plan includes
+                </h3>
 
                 {plan ? (
                   plan.features.length > 0 ? (
@@ -722,14 +1110,15 @@ const plan = plans.find(
 
                     <p className="text-xs leading-5 text-[var(--muted)]">
                       Payment confirmation and membership activation
-                      require server-side verification. Neither is
-                      performed by this preview.
+                      are controlled by the backend. Manual payments
+                      require administrator approval.
                     </p>
                   </div>
                 </div>
               </div>
             </div>
 
+            {/* Contact card */}
             <div className="rounded-2xl border border-[var(--border)] p-5">
               <div className="flex items-center gap-3">
                 <LockKeyhole
@@ -772,7 +1161,7 @@ export default function CheckoutPage() {
     <Suspense
       fallback={
         <main className="min-h-screen bg-[var(--background)] p-8 text-[var(--foreground)]">
-          Loading checkout preview...
+          Loading checkout...
         </main>
       }
     >
