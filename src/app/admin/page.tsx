@@ -26,6 +26,7 @@ import {
   LogOut,
   Menu,
   RefreshCw,
+  Settings,
   ShieldCheck,
   Users,
   Wallet,
@@ -280,22 +281,25 @@ function SectionHeading({
 function MembershipPlansLink({
   mobile = false,
   onClick,
+  collapsed = false,
 }: {
   mobile?: boolean;
   onClick?: () => void;
+  collapsed?: boolean;
 }) {
   return (
     <Link
       href="/admin/plans"
       onClick={onClick}
+      title={collapsed ? "Membership Plans" : undefined}
       className={
         mobile
-          ? "flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/70 transition hover:bg-white/5 hover:text-white"
-          : "flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/5 hover:text-white"
+          ? "flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
+          : `flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)] ${collapsed ? "justify-center px-2" : ""}`
       }
     >
       <Layers size={18} className="shrink-0 text-[#e6ca8b]" />
-      <span>Membership Plans</span>
+      {!collapsed && <span>Membership Plans</span>}
     </Link>
   );
 }
@@ -310,7 +314,51 @@ export default function AdminPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    try {
+      return window.localStorage.getItem("membrix-admin-sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const updateTheme = () => {
+      setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+    };
+
+    updateTheme();
+    window.addEventListener("membrix-theme-change", updateTheme);
+
+    return () => window.removeEventListener("membrix-theme-change", updateTheme);
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("membrix-admin-sidebar-collapsed", String(sidebarCollapsed));
+    } catch {
+      // Ignore storage issues and keep the current interface state.
+    }
+  }, [sidebarCollapsed]);
+
+  function toggleTheme() {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    document.documentElement.classList.toggle("dark", nextTheme === "dark");
+    document.documentElement.dataset.theme = nextTheme;
+    try {
+      localStorage.setItem("membrix-theme", nextTheme);
+    } catch {
+      // Ignore storage issues and keep using the current browser session.
+    }
+    window.dispatchEvent(new Event("membrix-theme-change"));
+    setTheme(nextTheme);
+  }
 
   const loadOverview = useCallback(async () => {
     setError("");
@@ -524,73 +572,89 @@ export default function AdminPage() {
     >
       <div className="mx-auto flex min-h-screen max-w-[1920px]">
         {/* Desktop sidebar */}
-        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[258px] flex-col bg-[#102b46] text-white lg:flex">
-          <div className="border-b border-white/10 px-6 py-6">
-            <Link href="/admin" className="flex items-center gap-3">
+        <aside className={`fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] transition-all duration-300 lg:flex ${sidebarCollapsed ? "w-[88px]" : "w-[258px]"}`}>
+          <div className="border-b border-[var(--border)] px-4 py-5">
+            <Link href="/admin" className="flex items-center gap-3" title={sidebarCollapsed ? "Membrix admin" : undefined}>
               <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#d6b878]/25 bg-[#d6b878]/10 text-[#e6ca8b]">
                 <Building2 size={21} strokeWidth={1.7} />
               </span>
 
-              <span>
-                <span className="block text-xl font-semibold tracking-tight">
-                  Membrix<span className="text-[#d6b878]">.</span>
+              {!sidebarCollapsed && (
+                <span>
+                  <span className="block text-xl font-semibold tracking-tight">
+                    Membrix<span className="text-[#d6b878]">.</span>
+                  </span>
+                  <span className="mt-0.5 block text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
+                    Management suite
+                  </span>
                 </span>
-                <span className="mt-0.5 block text-[10px] uppercase tracking-[0.18em] text-white/45">
-                  Management suite
-                </span>
-              </span>
+              )}
             </Link>
           </div>
 
-          <div className="px-4 pt-7">
-            <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">
-              Workspace
-            </p>
+          <div className="px-3 pt-7">
+            {!sidebarCollapsed && (
+              <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
+                Workspace
+              </p>
+            )}
 
             <nav className="space-y-1">
               <Link
                 href="/admin"
+                title={sidebarCollapsed ? "Overview" : undefined}
                 aria-current="page"
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/10 px-3.5 py-3 text-sm font-medium text-white"
+                className={`flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3.5 py-3 text-sm font-medium text-[var(--foreground)] ${sidebarCollapsed ? "justify-center px-2" : ""}`}
               >
                 <LayoutDashboard size={18} className="text-[#e6ca8b]" />
-                <span>Overview</span>
-                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#e6ca8b]" />
+                {!sidebarCollapsed && <span>Overview</span>}
+                {!sidebarCollapsed && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#e6ca8b]" />}
               </Link>
 
               <Link
                 href="/admin/members"
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/5 hover:text-white"
+                title={sidebarCollapsed ? "Members" : undefined}
+                className={`flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)] ${sidebarCollapsed ? "justify-center px-2" : ""}`}
               >
                 <Users size={18} />
-                <span>Members</span>
+                {!sidebarCollapsed && <span>Members</span>}
               </Link>
 
               <Link
                 href="/admin/payments"
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/5 hover:text-white"
+                title={sidebarCollapsed ? "Payments" : undefined}
+                className={`flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)] ${sidebarCollapsed ? "justify-center px-2" : ""}`}
               >
                 <Wallet size={18} />
-                <span>Payments</span>
-                {overview && overview.pendingPayments > 0 && (
-                  <span className="ml-auto rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                {!sidebarCollapsed && <span>Payments</span>}
+                {!sidebarCollapsed && overview && overview.pendingPayments > 0 && (
+                  <span className="ml-auto rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-600">
                     {overview.pendingPayments}
                   </span>
                 )}
               </Link>
 
-              <MembershipPlansLink />
+              <MembershipPlansLink collapsed={sidebarCollapsed} />
+
+              <Link
+                href="/admin/settings"
+                title={sidebarCollapsed ? "Settings" : undefined}
+                className={`flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)] ${sidebarCollapsed ? "justify-center px-2" : ""}`}
+              >
+                <Settings size={18} />
+                {!sidebarCollapsed && <span>Settings</span>}
+              </Link>
             </nav>
           </div>
 
           <div className="px-4 pt-8">
-            <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">
+            <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
               Quick links
             </p>
 
             <Link
               href="/"
-              className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/5 hover:text-white"
+              className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
             >
               <ArrowLeft size={16} />
               <span>Back to website</span>
@@ -600,7 +664,7 @@ export default function AdminPage() {
               type="button"
               onClick={handleLogout}
               disabled={loggingOut}
-              className="mt-1 flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-rose-500/10 hover:text-rose-200 disabled:opacity-60"
+              className="mt-1 flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-60"
             >
               <LogOut size={16} />
               <span>{loggingOut ? "Signing out..." : "Sign out"}</span>
@@ -608,37 +672,52 @@ export default function AdminPage() {
           </div>
 
           <div className="mt-auto p-4">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#d6b878]/10 text-[#e6ca8b]">
                 <ShieldCheck size={18} />
               </span>
 
-              <p className="mt-3 text-sm font-medium">
-                Protected workspace
-              </p>
+              {!sidebarCollapsed && (
+                <>
+                  <p className="mt-3 text-sm font-medium">
+                    Protected workspace
+                  </p>
 
-              <p className="mt-1.5 text-xs leading-5 text-white/45">
-                Admin permissions are verified by the backend on each
-                dashboard request.
-              </p>
+                  <p className="mt-1.5 text-xs leading-5 text-[var(--muted)]">
+                    Admin permissions are verified by the backend on each
+                    dashboard request.
+                  </p>
 
-              <div className="mt-4 flex items-center gap-2 border-t border-white/10 pt-3 text-[10px] font-medium uppercase tracking-[0.14em] text-emerald-300/80">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                Secure session
-              </div>
+                  <div className="mt-4 flex items-center gap-2 border-t border-[var(--border)] pt-3 text-[10px] font-medium uppercase tracking-[0.14em] text-emerald-600">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    Secure session
+                  </div>
+                </>
+              )}
             </div>
 
-            <p className="px-3 pb-1 pt-5 text-[10px] text-white/30">
-              MEMBRIX ADMINISTRATION
-            </p>
+            {!sidebarCollapsed && (
+              <p className="px-3 pb-1 pt-5 text-[10px] text-[var(--muted)]">
+                MEMBRIX ADMINISTRATION
+              </p>
+            )}
           </div>
         </aside>
 
         {/* Main content */}
-        <div className="min-w-0 flex-1 lg:ml-[258px]">
+        <div className={`min-w-0 flex-1 transition-all duration-300 ${sidebarCollapsed ? "lg:ml-[88px]" : "lg:ml-[258px]"}`}>
           <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/90 backdrop-blur-xl">
             <div className="flex h-[76px] items-center justify-between gap-4 px-5 sm:px-8 xl:px-10">
               <div className="flex min-w-0 items-center gap-3">
+                <button
+                  type="button"
+                  aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  onClick={() => setSidebarCollapsed((current) => !current)}
+                  className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] transition hover:bg-[var(--surface-alt)] lg:flex"
+                >
+                  <Menu size={19} />
+                </button>
+
                 <button
                   type="button"
                   aria-label="Open navigation menu"
@@ -649,7 +728,7 @@ export default function AdminPage() {
                 </button>
 
                 <div className="min-w-0">
-                  <p className="truncate text-xs text-[var(--muted)]">
+                  <p className="truncate text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
                     Membrix / Administration
                   </p>
                   <p className="mt-1 truncate text-sm font-semibold">
@@ -659,6 +738,15 @@ export default function AdminPage() {
               </div>
 
               <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+                  onClick={toggleTheme}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] transition hover:border-[#d6b878] hover:text-[#d6b878]"
+                >
+                  {theme === "dark" ? <span aria-hidden="true">☀</span> : <span aria-hidden="true">☾</span>}
+                </button>
+
                 <div className="hidden text-right sm:block">
                   <p className="text-sm font-semibold">
                     {admin?.name || "Administrator"}
@@ -730,9 +818,9 @@ export default function AdminPage() {
             <section className="admin-reveal mb-8 flex flex-wrap items-center gap-3">
               <Link
                 href="/admin/members"
-                className="inline-flex items-center gap-2 rounded-xl bg-[#102b46] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#183c5e]"
+                className="inline-flex items-center gap-2 rounded-xl bg-[#d6b878] px-4 py-2.5 text-sm font-semibold text-[#1d160c] shadow-sm transition-colors duration-200 hover:bg-[#e0bc80] hover:text-[#1d160c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d6b878] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)] disabled:cursor-not-allowed disabled:bg-[#d6b878]/60 disabled:text-[#1d160c]/75"
               >
-                <Users size={16} className="text-[#d6b878]" />
+                <Users size={16} className="text-[#1d160c]" />
                 Manage members
                 <ArrowRight size={14} />
               </Link>
@@ -784,7 +872,7 @@ export default function AdminPage() {
                   type="button"
                   onClick={handleRefresh}
                   disabled={refreshing}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#102b46] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[var(--foreground)] px-4 py-2.5 text-sm font-medium text-[var(--background)] disabled:opacity-60"
                 >
                   <RefreshCw size={15} />
                   Try again
@@ -814,21 +902,21 @@ export default function AdminPage() {
                   />
 
                   <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
-                    <article className="admin-reveal relative overflow-hidden rounded-2xl bg-[#102b46] p-6 text-white sm:p-7 xl:col-span-2">
-                      <div className="pointer-events-none absolute -right-12 -top-24 h-64 w-64 rounded-full border border-white/[0.07]" />
-                      <div className="pointer-events-none absolute -right-1 -top-16 h-44 w-44 rounded-full border border-white/[0.07]" />
+                    <article className="admin-reveal relative overflow-hidden rounded-2xl bg-[var(--dark-panel)] p-6 text-[var(--foreground)] sm:p-7 xl:col-span-2">
+                      <div className="pointer-events-none absolute -right-12 -top-24 h-64 w-64 rounded-full border border-[var(--border)]/70" />
+                      <div className="pointer-events-none absolute -right-1 -top-16 h-44 w-44 rounded-full border border-[var(--border)]/70" />
                       <div className="pointer-events-none absolute -bottom-20 left-1/3 h-40 w-40 rounded-full bg-[#d6b878]/10 blur-3xl" />
 
                       <div className="relative">
                         <div className="flex flex-wrap items-start justify-between gap-4">
                           <div>
-                            <p className="text-sm text-white/60">
+                            <p className="text-sm text-[var(--muted)]">
                               Confirmed revenue
                             </p>
                             <p className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
                               {formatMoney(overview.totalRevenue)}
                             </p>
-                            <p className="mt-2 text-xs leading-5 text-white/50">
+                            <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
                               Total sum of payments marked completed in BDT.
                             </p>
                           </div>
@@ -838,12 +926,12 @@ export default function AdminPage() {
                           </span>
                         </div>
 
-                        <div className="mt-7 grid grid-cols-1 gap-3 border-t border-white/10 pt-5 sm:grid-cols-2">
+                        <div className="mt-7 grid grid-cols-1 gap-3 border-t border-[var(--border)] pt-5 sm:grid-cols-2">
                           <Link
                             href="/admin/payments?status=completed"
-                            className="group flex items-center gap-3 rounded-xl p-2 transition hover:bg-white/5"
+                            className="group flex items-center gap-3 rounded-xl p-2 transition hover:bg-[var(--surface)]"
                           >
-                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-400/10 text-emerald-300">
+                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-400/10 text-emerald-600">
                               <CheckCircle2 size={18} />
                             </span>
 
@@ -851,7 +939,7 @@ export default function AdminPage() {
                               <p className="text-lg font-semibold group-hover:text-[#e6ca8b]">
                                 {formatNumber(overview.completedPayments)}
                               </p>
-                              <p className="mt-0.5 text-xs text-white/50">
+                              <p className="mt-0.5 text-xs text-[var(--muted)]">
                                 Completed payments
                               </p>
                             </div>
@@ -859,9 +947,9 @@ export default function AdminPage() {
 
                           <Link
                             href="/admin/payments?status=pending"
-                            className="group flex items-center gap-3 rounded-xl p-2 transition hover:bg-white/5"
+                            className="group flex items-center gap-3 rounded-xl p-2 transition hover:bg-[var(--surface)]"
                           >
-                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-400/10 text-amber-300">
+                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-400/10 text-amber-600">
                               <Clock3 size={18} />
                             </span>
 
@@ -872,7 +960,7 @@ export default function AdminPage() {
                                     overview.processingPayments,
                                 )}
                               </p>
-                              <p className="mt-0.5 text-xs text-white/50">
+                              <p className="mt-0.5 text-xs text-[var(--muted)]">
                                 Pending and processing
                               </p>
                             </div>
@@ -1096,8 +1184,8 @@ export default function AdminPage() {
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
           />
 
-          <aside className="absolute inset-y-0 left-0 flex w-[min(300px,85vw)] flex-col bg-[#102b46] p-5 text-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 pb-5">
+          <aside className="absolute inset-y-0 left-0 flex w-[min(300px,85vw)] flex-col bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-5">
               <Link
                 href="/admin"
                 onClick={() => setMobileMenuOpen(false)}
@@ -1116,13 +1204,13 @@ export default function AdminPage() {
                 type="button"
                 aria-label="Close navigation menu"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10"
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)]"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <p className="mb-3 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
+            <p className="mb-3 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
               Workspace
             </p>
 
@@ -1130,7 +1218,7 @@ export default function AdminPage() {
               <Link
                 href="/admin"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/10 px-3.5 py-3 text-sm font-medium"
+                className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3.5 py-3 text-sm font-medium"
               >
                 <LayoutDashboard size={18} className="text-[#e6ca8b]" />
                 Overview
@@ -1139,7 +1227,7 @@ export default function AdminPage() {
               <Link
                 href="/admin/members"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/70 transition hover:bg-white/5 hover:text-white"
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
               >
                 <Users size={18} />
                 Members
@@ -1148,7 +1236,7 @@ export default function AdminPage() {
               <Link
                 href="/admin/payments"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/70 transition hover:bg-white/5 hover:text-white"
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
               >
                 <Wallet size={18} />
                 Payments
@@ -1160,23 +1248,23 @@ export default function AdminPage() {
               />
             </div>
 
-            <div className="mt-6 border-t border-white/10 pt-4">
+            <div className="mt-6 border-t border-[var(--border)] pt-4">
               <Link
                 href="/"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/70 transition hover:bg-white/5 hover:text-white"
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
               >
                 <ArrowLeft size={16} />
                 Back to website
               </Link>
             </div>
 
-            <div className="mt-auto border-t border-white/10 pt-5">
+            <div className="mt-auto border-t border-[var(--border)] pt-5">
               <p className="truncate text-sm font-medium">
                 {admin?.name || "Administrator"}
               </p>
 
-              <p className="mt-1 truncate text-xs text-white/45">
+              <p className="mt-1 truncate text-xs text-[var(--muted)]">
                 {admin?.email || ""}
               </p>
 
@@ -1184,7 +1272,7 @@ export default function AdminPage() {
                 type="button"
                 onClick={handleLogout}
                 disabled={loggingOut}
-                className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-white/10 text-sm font-medium transition hover:bg-white/5 disabled:opacity-60"
+                className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] text-sm font-medium transition hover:bg-[var(--surface-alt)] disabled:opacity-60"
               >
                 <LogOut size={16} />
                 {loggingOut ? "Signing out..." : "Sign out"}

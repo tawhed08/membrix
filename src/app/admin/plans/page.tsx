@@ -22,6 +22,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings,
   ShieldCheck,
   Sparkles,
   ToggleLeft,
@@ -523,7 +524,7 @@ export default function AdminPlansPage() {
               </Link>
 
               <Link href="/admin" className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#102b46] text-[#e6ca8b]">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-alt)] text-[#e6ca8b]">
                   <ShieldCheck size={21} />
                 </span>
                 <span>
@@ -609,6 +610,12 @@ export default function AdminPlansPage() {
                 Membership plans
               </Link>
               <Link
+                href="/admin/settings"
+                className="rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
+              >
+                Settings
+              </Link>
+              <Link
                 href="/"
                 className="rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm"
               >
@@ -666,6 +673,14 @@ export default function AdminPlansPage() {
                 Membership plans
               </Link>
 
+              <Link
+                href="/admin/settings"
+                className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-[var(--muted-foreground)] transition hover:bg-[var(--card)] hover:text-[var(--foreground)]"
+              >
+                <Settings size={17} />
+                Settings
+              </Link>
+
               <div className="my-5 border-t border-[var(--border)]" />
 
               <Link
@@ -702,7 +717,7 @@ export default function AdminPlansPage() {
               <button
                 type="button"
                 onClick={openCreateEditor}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#102b46] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#193e60]"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--foreground)] px-5 py-3 text-sm font-semibold text-[var(--background)] transition hover:opacity-90"
               >
                 <Plus size={17} />
                 Create plan
@@ -846,7 +861,7 @@ export default function AdminPlansPage() {
                     <button
                       type="button"
                       onClick={openCreateEditor}
-                      className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#102b46] px-4 py-2.5 text-sm font-medium text-white"
+                      className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[var(--foreground)] px-4 py-2.5 text-sm font-medium text-[var(--background)]"
                     >
                       <Plus size={16} />
                       Create plan
@@ -1237,7 +1252,7 @@ export default function AdminPlansPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#102b46] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#193e60] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--foreground)] px-5 py-3 text-sm font-semibold text-[var(--background)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? (
                     <LoaderCircle size={16} className="animate-spin" />

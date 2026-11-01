@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import gsap from "gsap";
@@ -17,6 +18,7 @@ import {
   Power,
   RefreshCw,
   Search,
+  Settings,
   ShieldCheck,
   UserRound,
   Users,
@@ -47,6 +49,7 @@ type AdminMember = {
   id: string;
   name: string;
   email: string;
+  profileImage: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -427,8 +430,8 @@ const [updatingMemberId, setUpdatingMemberId] =
     >
       <div className="mx-auto flex min-h-screen max-w-[1920px]">
         {/* Desktop sidebar */}
-        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[258px] flex-col bg-[#102b46] text-white lg:flex">
-          <div className="border-b border-white/10 px-6 py-6">
+        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[258px] flex-col border-r border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] lg:flex">
+          <div className="border-b border-[var(--border)] px-6 py-6">
             <Link href="/admin" className="flex items-center gap-3">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#d6b878]/25 bg-[#d6b878]/10 text-[#e6ca8b]">
                 <Building2 size={21} />
@@ -438,7 +441,7 @@ const [updatingMemberId, setUpdatingMemberId] =
                 <span className="block text-xl font-semibold">
                   Membrix<span className="text-[#d6b878]">.</span>
                 </span>
-                <span className="mt-0.5 block text-[10px] uppercase tracking-[0.18em] text-white/45">
+                <span className="mt-0.5 block text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">
                   Management suite
                 </span>
               </span>
@@ -446,14 +449,14 @@ const [updatingMemberId, setUpdatingMemberId] =
           </div>
 
           <div className="px-4 pt-7">
-            <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">
+            <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
               Workspace
             </p>
 
             <nav className="space-y-1">
               <Link
                 href="/admin"
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/5 hover:text-white"
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
               >
                 <LayoutDashboard size={18} />
                 Overview
@@ -462,7 +465,7 @@ const [updatingMemberId, setUpdatingMemberId] =
               <Link
                 href="/admin/members"
                 aria-current="page"
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/10 px-3.5 py-3 text-sm font-medium text-white"
+                className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3.5 py-3 text-sm font-medium text-[var(--foreground)]"
               >
                 <Users size={18} className="text-[#e6ca8b]" />
                 Members
@@ -471,22 +474,30 @@ const [updatingMemberId, setUpdatingMemberId] =
 
               <Link
                 href="/admin/payments"
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/5 hover:text-white"
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
               >
                 <Wallet size={18} />
                 Payments
+              </Link>
+
+              <Link
+                href="/admin/settings"
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
+              >
+                <Settings size={18} />
+                Settings
               </Link>
             </nav>
           </div>
 
           <div className="px-4 pt-8">
-            <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">
+            <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
               Quick links
             </p>
 
             <Link
               href="/"
-              className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/5 hover:text-white"
+              className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
             >
               <ArrowLeft size={16} />
               Back to website
@@ -496,7 +507,7 @@ const [updatingMemberId, setUpdatingMemberId] =
               type="button"
               onClick={handleLogout}
               disabled={loggingOut}
-              className="mt-1 flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/65 transition hover:bg-rose-500/10 hover:text-rose-200 disabled:opacity-60"
+              className="mt-1 flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-60"
             >
               <LogOut size={16} />
               <span>{loggingOut ? "Signing out..." : "Sign out"}</span>
@@ -504,7 +515,7 @@ const [updatingMemberId, setUpdatingMemberId] =
           </div>
 
           <div className="mt-auto p-4">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#d6b878]/10 text-[#e6ca8b]">
                 <ShieldCheck size={18} />
               </span>
@@ -513,13 +524,13 @@ const [updatingMemberId, setUpdatingMemberId] =
                 Protected workspace
               </p>
 
-              <p className="mt-1.5 text-xs leading-5 text-white/45">
+              <p className="mt-1.5 text-xs leading-5 text-[var(--muted)]">
                 Member information is fetched from the protected
                 administration API.
               </p>
             </div>
 
-            <p className="px-3 pb-1 pt-5 text-[10px] text-white/30">
+            <p className="px-3 pb-1 pt-5 text-[10px] text-[var(--muted)]">
               MEMBRIX ADMINISTRATION
             </p>
           </div>
@@ -666,7 +677,7 @@ const [updatingMemberId, setUpdatingMemberId] =
                   <p className="text-sm text-[var(--muted)]">
                     Inactive accounts
                   </p>
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-500/10 text-slate-500">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-alt)] text-[var(--muted)]">
                     <UserRound size={19} />
                   </span>
                 </div>
@@ -739,7 +750,7 @@ const [updatingMemberId, setUpdatingMemberId] =
                     <button
                       type="submit"
                       disabled={loading}
-                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#102b46] px-4 text-sm font-medium text-white transition hover:bg-[#183c5e] disabled:opacity-60"
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--foreground)] px-4 text-sm font-medium text-[var(--background)] transition hover:opacity-90 disabled:opacity-60"
                     >
                       <Search size={15} />
                       Search
@@ -904,8 +915,19 @@ const [updatingMemberId, setUpdatingMemberId] =
                           >
                             <td className="px-5 py-4 sm:px-6">
                               <div className="flex min-w-0 items-center gap-3">
-                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#d6b878]/20 bg-[#d6b878]/10 text-xs font-semibold text-[#a98843]">
-                                  {getInitials(member.name)}
+                                <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#d6b878]/20 bg-[#d6b878]/10 text-xs font-semibold text-[#a98843]">
+                                  {member.profileImage ? (
+                                    <Image
+                                      src={member.profileImage}
+                                      alt=""
+                                      fill
+                                      unoptimized
+                                      sizes="40px"
+                                      className="object-cover"
+                                    />
+                                  ) : (
+                                    getInitials(member.name)
+                                  )}
                                 </span>
 
                                 <div className="min-w-0">
@@ -1056,8 +1078,8 @@ const [updatingMemberId, setUpdatingMemberId] =
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
           />
 
-          <aside className="absolute inset-y-0 left-0 flex w-[min(300px,85vw)] flex-col bg-[#102b46] p-5 text-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 pb-5">
+          <aside className="absolute inset-y-0 left-0 flex w-[min(300px,85vw)] flex-col bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-5">
               <Link
                 href="/admin"
                 onClick={() => setMobileMenuOpen(false)}
@@ -1076,13 +1098,13 @@ const [updatingMemberId, setUpdatingMemberId] =
                 type="button"
                 aria-label="Close navigation menu"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10"
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)]"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <p className="mb-3 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
+            <p className="mb-3 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
               Workspace
             </p>
 
@@ -1090,7 +1112,7 @@ const [updatingMemberId, setUpdatingMemberId] =
               <Link
                 href="/admin"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/70 transition hover:bg-white/5 hover:text-white"
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
               >
                 <LayoutDashboard size={18} />
                 Overview
@@ -1099,7 +1121,7 @@ const [updatingMemberId, setUpdatingMemberId] =
               <Link
                 href="/admin/members"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/10 px-3.5 py-3 text-sm font-medium"
+                className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3.5 py-3 text-sm font-medium"
               >
                 <Users size={18} className="text-[#e6ca8b]" />
                 Members
@@ -1109,30 +1131,39 @@ const [updatingMemberId, setUpdatingMemberId] =
               <Link
                 href="/admin/payments"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/70 transition hover:bg-white/5 hover:text-white"
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
               >
                 <Wallet size={18} />
                 Payments
               </Link>
+
+              <Link
+                href="/admin/settings"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
+              >
+                <Settings size={18} />
+                Settings
+              </Link>
             </div>
 
-            <div className="mt-6 border-t border-white/10 pt-4">
+            <div className="mt-6 border-t border-[var(--border)] pt-4">
               <Link
                 href="/"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-white/70 transition hover:bg-white/5 hover:text-white"
+                className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
               >
                 <ArrowLeft size={16} />
                 Back to website
               </Link>
             </div>
 
-            <div className="mt-auto border-t border-white/10 pt-5">
+            <div className="mt-auto border-t border-[var(--border)] pt-5">
               <p className="truncate text-sm font-medium">
                 {admin?.name || "Administrator"}
               </p>
 
-              <p className="mt-1 truncate text-xs text-white/45">
+              <p className="mt-1 truncate text-xs text-[var(--muted)]">
                 {admin?.email || ""}
               </p>
 
@@ -1140,7 +1171,7 @@ const [updatingMemberId, setUpdatingMemberId] =
                 type="button"
                 onClick={handleLogout}
                 disabled={loggingOut}
-                className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-white/10 text-sm font-medium transition hover:bg-white/5 disabled:opacity-60"
+                className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] text-sm font-medium transition hover:bg-[var(--surface-alt)] disabled:opacity-60"
               >
                 <LogOut size={16} />
                 {loggingOut ? "Signing out..." : "Sign out"}

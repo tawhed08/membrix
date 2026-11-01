@@ -33,6 +33,7 @@ import {
   Menu,
   RefreshCw,
   Search,
+  Settings,
   ShieldCheck,
   Users,
   Wallet,
@@ -203,25 +204,25 @@ function getStatusLabel(status?: string): string {
 function getStatusClasses(status?: string): string {
   switch (normalizeStatus(status)) {
     case "pending":
-      return "border-amber-200 bg-amber-50 text-amber-800";
+      return "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--foreground)]";
 
     case "processing":
-      return "border-blue-200 bg-blue-50 text-blue-800";
+      return "border-[var(--gold)]/50 bg-[var(--gold)]/15 text-[var(--foreground)]";
 
     case "completed":
-      return "border-emerald-200 bg-emerald-50 text-emerald-800";
+      return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
 
     case "rejected":
-      return "border-rose-200 bg-rose-50 text-rose-800";
+      return "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300";
 
     case "failed":
-      return "border-red-300 bg-red-100 text-red-900";
+      return "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300";
 
     case "refunded":
-      return "border-violet-200 bg-violet-50 text-violet-800";
+      return "border-[var(--border)] bg-[var(--surface-alt)] text-[var(--foreground)]";
 
     default:
-      return "border-slate-200 bg-slate-50 text-slate-700";
+      return "border-[var(--border)] bg-[var(--surface-alt)] text-[var(--muted-foreground)]";
   }
 }
 
@@ -272,21 +273,17 @@ function getMethodLabel(method?: string): string {
 function getMethodClasses(method?: string): string {
   switch (normalizeMethod(method)) {
     case "bkash":
-      return "border-pink-200 bg-pink-50 text-pink-800";
-
     case "nagad":
-      return "border-orange-200 bg-orange-50 text-orange-800";
-
     case "bank":
     case "bank_transfer":
-      return "border-slate-200 bg-slate-100 text-slate-800";
+      return "border-[var(--border)] bg-[var(--surface-alt)] text-[var(--foreground)]";
 
     case "online":
     case "aamarpay":
-      return "border-[#d6b878]/40 bg-[#f8f3e7] text-[#76591e]";
+      return "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--foreground)]";
 
     default:
-      return "border-slate-200 bg-slate-50 text-slate-700";
+      return "border-[var(--border)] bg-[var(--surface-alt)] text-[var(--muted-foreground)]";
   }
 }
 
@@ -447,13 +444,13 @@ function StatCard({
   return (
     <div
       data-payment-animate
-      className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_4px_24px_rgba(15,23,42,0.035)] transition duration-200 hover:-translate-y-0.5 hover:shadow-md sm:p-6"
+      className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md sm:p-6"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className="text-sm font-medium text-[var(--muted)]">{title}</p>
 
-          <p className="mt-3 truncate text-2xl font-bold tracking-tight text-[#102b46] sm:text-3xl">
+          <p className="mt-3 truncate text-2xl font-bold tracking-tight text-[var(--foreground)] sm:text-3xl">
             {value}
           </p>
         </div>
@@ -465,7 +462,7 @@ function StatCard({
         </div>
       </div>
 
-      <p className="mt-3 text-xs leading-5 text-slate-500">
+      <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
         {description}
       </p>
     </div>
@@ -883,29 +880,29 @@ export default function AdminPaymentsPage() {
   return (
     <div
       ref={containerRef}
-      className="min-h-screen bg-[#f5f7fa] text-[#102b46]"
+      className="min-h-screen bg-[var(--background)] text-[var(--foreground)]"
     >
       {mobileMenuOpen && (
         <button
           type="button"
           aria-label="Close navigation"
           onClick={() => setMobileMenuOpen(false)}
-          className="fixed inset-0 z-40 bg-[#0b1c2e]/55 backdrop-blur-[2px] lg:hidden"
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] lg:hidden"
         />
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[264px] flex-col bg-[#102b46] text-white transition-transform duration-300 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[264px] flex-col bg-[var(--surface)] text-[var(--foreground)] transition-transform duration-300 ${
           mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
         } lg:translate-x-0`}
       >
-        <div className="flex h-[82px] items-center justify-between border-b border-white/10 px-6">
+        <div className="flex h-[82px] items-center justify-between border-b border-[var(--border)] px-6">
           <Link
             href="/admin"
             className="flex items-center gap-3"
             onClick={() => setMobileMenuOpen(false)}
           >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#d6b878] text-[#102b46]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--gold)] text-[var(--gold-contrast)]">
               <ShieldCheck size={22} strokeWidth={2.2} />
             </div>
 
@@ -913,7 +910,7 @@ export default function AdminPaymentsPage() {
               <p className="text-[19px] font-bold tracking-tight">
                 Membrix
               </p>
-              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+              <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
                 Administration
               </p>
             </div>
@@ -923,14 +920,14 @@ export default function AdminPaymentsPage() {
             type="button"
             onClick={() => setMobileMenuOpen(false)}
             aria-label="Close menu"
-            className="rounded-lg p-2 text-slate-300 hover:bg-white/10 lg:hidden"
+            className="rounded-lg p-2 text-[var(--muted)] hover:bg-[var(--surface-alt)] lg:hidden"
           >
             <X size={19} />
           </button>
         </div>
 
         <div className="px-5 pb-3 pt-7">
-          <p className="px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+          <p className="px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">
             Workspace
           </p>
         </div>
@@ -939,7 +936,7 @@ export default function AdminPaymentsPage() {
           <Link
             href="/admin"
             onClick={() => setMobileMenuOpen(false)}
-            className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/[0.07] hover:text-white"
+            className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
           >
             <LayoutDashboard size={18} />
             Overview
@@ -949,7 +946,7 @@ export default function AdminPaymentsPage() {
           <Link
             href="/admin/members"
             onClick={() => setMobileMenuOpen(false)}
-            className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/[0.07] hover:text-white"
+            className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
           >
             <Users size={18} />
             Members
@@ -958,28 +955,37 @@ export default function AdminPaymentsPage() {
           <Link
             href="/admin/payments"
             onClick={() => setMobileMenuOpen(false)}
-            className="flex items-center gap-3 rounded-xl border border-[#d6b878]/20 bg-[#d6b878]/10 px-3.5 py-3 text-sm font-semibold text-[#e8ce91]"
+            className="flex items-center gap-3 rounded-xl border border-[var(--gold)]/25 bg-[var(--gold)]/10 px-3.5 py-3 text-sm font-semibold text-[var(--foreground)]"
           >
             <Wallet size={18} />
             Payments
-            <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#d6b878]" />
+            <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--gold)]" />
+          </Link>
+
+          <Link
+            href="/admin/settings"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
+          >
+            <Settings size={18} />
+            Settings
           </Link>
         </nav>
 
-        <div className="mx-5 mb-5 rounded-2xl border border-white/10 bg-white/[0.045] p-4">
-          <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-[#d6b878]">
+        <div className="mx-5 mb-5 rounded-2xl border border-[var(--border)] bg-[var(--surface-alt)] p-4">
+          <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--gold)]/10 text-[var(--gold)]">
             <ShieldCheck size={18} />
           </div>
           <p className="text-sm font-semibold">Admin workspace</p>
-          <p className="mt-1 text-xs leading-5 text-slate-400">
+          <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
             Manage members and review manual payments securely.
           </p>
         </div>
 
-        <div className="border-t border-white/10 p-4">
+        <div className="border-t border-[var(--border)] p-4">
           <Link
             href="/"
-            className="mb-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-300 transition hover:bg-white/[0.07] hover:text-white"
+            className="mb-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]"
           >
             <ArrowLeft size={17} />
             Back to website
@@ -989,7 +995,7 @@ export default function AdminPaymentsPage() {
             type="button"
             onClick={() => void handleLogout()}
             disabled={loggingOut}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-300 transition hover:bg-rose-400/10 hover:text-rose-200 disabled:opacity-60"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[var(--muted)] transition hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-300 disabled:opacity-60"
           >
             {loggingOut ? (
               <RefreshCw size={17} className="animate-spin" />
@@ -1002,28 +1008,28 @@ export default function AdminPaymentsPage() {
       </aside>
 
       <main className="min-w-0 lg:pl-[264px]">
-        <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
+        <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/90 backdrop-blur-xl">
           <div className="flex h-[72px] items-center justify-between gap-4 px-4 sm:px-7 xl:px-10">
             <div className="flex min-w-0 items-center gap-3">
               <button
                 type="button"
                 aria-label="Open navigation"
                 onClick={() => setMobileMenuOpen(true)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-[#102b46] transition hover:bg-slate-50 lg:hidden"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] text-[var(--foreground)] transition hover:bg-[var(--surface-alt)] lg:hidden"
               >
                 <Menu size={20} />
               </button>
 
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
                   <span>Admin</span>
                   <ChevronRight size={13} />
-                  <span className="font-medium text-[#8b6b2e]">
+                  <span className="font-medium text-[var(--gold)]">
                     Payments
                   </span>
                 </div>
 
-                <h1 className="mt-1 truncate text-lg font-bold tracking-tight text-[#102b46] sm:text-xl">
+                <h1 className="mt-1 truncate text-lg font-bold tracking-tight text-[var(--foreground)] sm:text-xl">
                   Payment management
                 </h1>
               </div>
@@ -1031,15 +1037,15 @@ export default function AdminPaymentsPage() {
 
             <div className="flex items-center gap-3">
               <div className="hidden text-right sm:block">
-                <p className="text-sm font-semibold text-[#102b46]">
+                <p className="text-sm font-semibold text-[var(--foreground)]">
                   {admin?.name || "Administrator"}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-400">
+                <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
                   Administrator
                 </p>
               </div>
 
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#d6b878]/30 bg-[#d6b878]/15 text-sm font-semibold text-[#a98843]">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--gold)]/30 bg-[var(--gold)]/10 text-sm font-semibold text-[var(--gold)]">
                 {getInitials(admin?.name || "Admin")}
               </div>
 
@@ -1048,7 +1054,7 @@ export default function AdminPaymentsPage() {
                 aria-label="Sign out"
                 onClick={() => void handleLogout()}
                 disabled={loggingOut}
-                className="hidden h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-medium transition hover:bg-slate-50 disabled:opacity-60 md:flex"
+                className="hidden h-10 items-center gap-2 rounded-xl border border-[var(--border)] px-3 text-sm font-medium transition hover:bg-[var(--surface-alt)] disabled:opacity-60 md:flex"
               >
                 <LogOut size={16} />
                 <span>{loggingOut ? "Signing out..." : "Sign out"}</span>
@@ -1060,7 +1066,7 @@ export default function AdminPaymentsPage() {
                   void Promise.all([loadPayments(), loadOverview()])
                 }
                 disabled={loading || overviewLoading}
-                className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 transition hover:border-[#d6b878]/60 hover:text-[#76591e] disabled:opacity-60 sm:px-4"
+                className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--gold)]/60 hover:text-[var(--gold)] disabled:opacity-60 sm:px-4"
               >
                 <RefreshCw
                   size={15}
@@ -1080,23 +1086,23 @@ export default function AdminPaymentsPage() {
             className="mb-7 flex flex-col justify-between gap-5 md:flex-row md:items-end"
           >
             <div>
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#d6b878]/30 bg-[#f8f3e7] px-3 py-1.5 text-xs font-semibold text-[#76591e]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#b99a5b]" />
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--gold)]/30 bg-[var(--gold)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--gold)]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--gold)]" />
                 Payment operations
               </div>
 
-              <h2 className="text-2xl font-bold tracking-tight text-[#102b46] sm:text-3xl">
+              <h2 className="text-2xl font-bold tracking-tight text-[var(--foreground)] sm:text-3xl">
                 Payments overview
               </h2>
 
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted-foreground)]">
                 Track transactions, check payment methods, and review
                 pending manual payments from one place.
               </p>
             </div>
 
-            <div className="flex w-fit items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-medium text-slate-500 shadow-sm">
-              <ShieldCheck size={16} className="text-[#b99a5b]" />
+            <div className="flex w-fit items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-xs font-medium text-[var(--muted-foreground)] shadow-sm">
+              <ShieldCheck size={16} className="text-[var(--gold)]" />
               Admin access
             </div>
           </section>
@@ -1104,7 +1110,7 @@ export default function AdminPaymentsPage() {
           {error && (
             <div
               role="alert"
-              className="mb-5 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3.5 text-sm text-rose-800"
+              className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3.5 text-sm text-red-700 dark:text-red-300"
             >
               <AlertCircle size={18} className="mt-0.5 shrink-0" />
 
@@ -1119,7 +1125,7 @@ export default function AdminPaymentsPage() {
                 type="button"
                 aria-label="Dismiss error"
                 onClick={() => setError("")}
-                className="rounded-lg p-1 text-rose-500 hover:bg-rose-100"
+                className="rounded-lg p-1 text-red-600 hover:bg-red-500/10 dark:text-red-300"
               >
                 <X size={16} />
               </button>
@@ -1129,7 +1135,7 @@ export default function AdminPaymentsPage() {
           {notice && (
             <div
               role="status"
-              className="mb-5 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3.5 text-sm text-emerald-800"
+              className="mb-5 flex items-center gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3.5 text-sm text-emerald-700 dark:text-emerald-300"
             >
               <CheckCircle2 size={18} className="shrink-0" />
               <p className="flex-1 font-medium">{notice}</p>
@@ -1138,7 +1144,7 @@ export default function AdminPaymentsPage() {
                 type="button"
                 aria-label="Dismiss message"
                 onClick={() => setNotice("")}
-                className="rounded-lg p-1 hover:bg-emerald-100"
+                className="rounded-lg p-1 hover:bg-emerald-500/10"
               >
                 <X size={16} />
               </button>
@@ -1155,7 +1161,7 @@ export default function AdminPaymentsPage() {
               }
               description="Payments matching your current filters"
               icon={<CreditCard size={21} />}
-              accent="bg-slate-100 text-[#102b46]"
+              accent="bg-[var(--surface-alt)] text-[var(--foreground)]"
             />
 
             <StatCard
@@ -1169,7 +1175,7 @@ export default function AdminPaymentsPage() {
               }
               description="Pending and processing payments"
               icon={<Clock3 size={21} />}
-              accent="bg-[#f8f3e7] text-[#76591e]"
+              accent="bg-[var(--gold)]/10 text-[var(--gold)]"
             />
 
             <StatCard
@@ -1183,7 +1189,7 @@ export default function AdminPaymentsPage() {
               }
               description="Successfully completed transactions"
               icon={<BadgeCheck size={21} />}
-              accent="bg-emerald-50 text-emerald-700"
+              accent="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
             />
 
             <StatCard
@@ -1195,17 +1201,17 @@ export default function AdminPaymentsPage() {
               }
               description="Revenue from completed payments"
               icon={<Banknote size={21} />}
-              accent="bg-[#f8f3e7] text-[#76591e]"
+              accent="bg-[var(--gold)]/10 text-[var(--gold)]"
             />
           </section>
 
           <section
             data-payment-animate
-            className="mb-6 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_4px_24px_rgba(15,23,42,0.025)] sm:p-5"
+            className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm sm:p-5"
           >
             <div className="mb-3 flex items-center gap-2">
-              <Activity size={17} className="text-[#b99a5b]" />
-              <h3 className="text-sm font-bold text-[#102b46]">
+              <Activity size={17} className="text-[var(--gold)]" />
+              <h3 className="text-sm font-bold text-[var(--foreground)]">
                 Payment status guide
               </h3>
             </div>
@@ -1219,30 +1225,30 @@ export default function AdminPaymentsPage() {
 
           <section
             data-payment-animate
-            className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_4px_28px_rgba(15,23,42,0.04)]"
+            className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm"
           >
-            <div className="border-b border-slate-200/80 px-5 py-5 sm:px-6">
+            <div className="border-b border-[var(--border)] px-5 py-5 sm:px-6">
               <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
                 <div>
-                  <h3 className="text-base font-bold text-[#102b46]">
+                  <h3 className="text-base font-semibold text-[var(--foreground)]">
                     Transaction history
                   </h3>
 
-                  <p className="mt-1 text-sm text-slate-500">
+                  <p className="mt-1 text-sm text-[var(--muted-foreground)]">
                     Search and filter transactions by status or payment
                     method.
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">
+                  <span className="rounded-lg bg-[var(--surface-alt)] px-3 py-2 text-xs font-semibold text-[var(--muted-foreground)]">
                     {pageTotal} result{pageTotal === 1 ? "" : "s"}
                   </span>
 
                   <button
                     type="button"
                     onClick={resetFilters}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] transition hover:border-[var(--gold)]/50 hover:bg-[var(--surface-alt)]"
                   >
                     <RefreshCw size={13} />
                     Reset filters
@@ -1254,10 +1260,10 @@ export default function AdminPaymentsPage() {
                 onSubmit={handleSearch}
                 className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.5fr)_minmax(170px,0.8fr)_minmax(180px,0.9fr)_auto] xl:items-center"
               >
-                <label className="flex h-11 min-w-0 items-center gap-2.5 rounded-xl border border-slate-200 bg-[#f8fafc] px-3.5 transition focus-within:border-[#b99a5b] focus-within:ring-2 focus-within:ring-[#d6b878]/15">
+                <label className="flex h-11 min-w-0 items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 transition focus-within:border-[var(--gold)] focus-within:ring-2 focus-within:ring-[var(--gold)]/15">
                   <Search
                     size={17}
-                    className="shrink-0 text-slate-400"
+                    className="shrink-0 text-[var(--muted-foreground)]"
                   />
 
                   <input
@@ -1266,17 +1272,17 @@ export default function AdminPaymentsPage() {
                       setDraftSearch(event.target.value)
                     }
                     placeholder="Search transactions or members..."
-                    className="min-w-0 flex-1 bg-transparent text-sm text-[#102b46] outline-none placeholder:text-slate-400"
+                    className="min-w-0 flex-1 bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]"
                   />
                 </label>
 
-                <label className="flex h-11 min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 transition focus-within:border-[#102b46] focus-within:ring-2 focus-within:ring-[#102b46]/10">
+                <label className="flex h-11 min-w-0 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 transition focus-within:border-[var(--gold)] focus-within:ring-2 focus-within:ring-[var(--gold)]/15">
                   <Filter
                     size={15}
-                    className="shrink-0 text-slate-400"
+                    className="shrink-0 text-[var(--muted-foreground)]"
                   />
 
-                  <span className="shrink-0 text-xs font-semibold text-slate-500">
+                  <span className="shrink-0 text-xs font-semibold text-[var(--muted-foreground)]">
                     Status
                   </span>
 
@@ -1290,7 +1296,7 @@ export default function AdminPaymentsPage() {
                         );
                         setPage(1);
                       }}
-                      className="w-full cursor-pointer appearance-none bg-transparent py-1 pr-5 text-sm font-semibold text-[#102b46] outline-none"
+                      className="w-full cursor-pointer appearance-none bg-transparent py-1 pr-5 text-sm font-semibold text-[var(--foreground)] outline-none"
                     >
                       <option value="all">All statuses</option>
                       {STATUS_OPTIONS.map((item) => (
@@ -1302,18 +1308,18 @@ export default function AdminPaymentsPage() {
 
                     <ChevronDown
                       size={14}
-                      className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-slate-400"
+                      className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]"
                     />
                   </span>
                 </label>
 
-                <label className="flex h-11 min-w-0 items-center gap-2 rounded-xl border border-[#d6b878]/40 bg-[#f8f3e7] px-3 transition hover:border-[#b99a5b] focus-within:ring-2 focus-within:ring-[#d6b878]/20">
+                <label className="flex h-11 min-w-0 items-center gap-2 rounded-xl border border-[var(--gold)]/35 bg-[var(--gold)]/10 px-3 transition hover:border-[var(--gold)] focus-within:ring-2 focus-within:ring-[var(--gold)]/20">
                   <Wallet
                     size={16}
-                    className="shrink-0 text-[#76591e]"
+                    className="shrink-0 text-[var(--gold)]"
                   />
 
-                  <span className="shrink-0 text-xs font-bold text-[#76591e]">
+                  <span className="shrink-0 text-xs font-bold text-[var(--gold)]">
                     Method
                   </span>
 
@@ -1327,7 +1333,7 @@ export default function AdminPaymentsPage() {
                         );
                         setPage(1);
                       }}
-                      className="w-full cursor-pointer appearance-none bg-transparent py-1 pr-5 text-sm font-bold text-[#102b46] outline-none"
+                      className="w-full cursor-pointer appearance-none bg-transparent py-1 pr-5 text-sm font-semibold text-[var(--foreground)] outline-none"
                     >
                       <option value="all">All methods</option>
                       {METHOD_OPTIONS.map((item) => (
@@ -1339,14 +1345,14 @@ export default function AdminPaymentsPage() {
 
                     <ChevronDown
                       size={14}
-                      className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[#76591e]"
+                      className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[var(--gold)]"
                     />
                   </span>
                 </label>
 
                 <button
                   type="submit"
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#102b46] px-5 text-sm font-semibold text-white transition hover:bg-[#193c5e]"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--foreground)] px-5 text-sm font-semibold text-[var(--background)] transition hover:bg-[var(--gold)] hover:text-[var(--gold-contrast)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
                 >
                   <Search size={15} />
                   Search
@@ -1358,32 +1364,32 @@ export default function AdminPaymentsPage() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[1050px] border-collapse text-left">
                   <thead>
-                    <tr className="border-b border-slate-200 bg-[#f8fafc]">
-                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-slate-500">
+                    <tr className="border-b border-[var(--border)] bg-[var(--surface-alt)]">
+                      <th className="px-6 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-[var(--muted-foreground)]">
                         Member
                       </th>
-                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-slate-500">
+                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-[var(--muted-foreground)]">
                         Transaction
                       </th>
-                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-slate-500">
+                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-[var(--muted-foreground)]">
                         Amount
                       </th>
-                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-slate-500">
+                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-[var(--muted-foreground)]">
                         Method
                       </th>
-                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-slate-500">
+                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-[var(--muted-foreground)]">
                         Status
                       </th>
-                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-slate-500">
+                      <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.13em] text-[var(--muted-foreground)]">
                         Date
                       </th>
-                      <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-[0.13em] text-slate-500">
+                      <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-[0.13em] text-[var(--muted-foreground)]">
                         Actions
                       </th>
                     </tr>
                   </thead>
 
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-[var(--border)]">
                     {loading ? (
                       Array.from({ length: 5 }).map((_, index) => (
                         <tr key={`skeleton-${index}`}>
@@ -1393,7 +1399,7 @@ export default function AdminPaymentsPage() {
                                 key={`skeleton-${index}-${columnIndex}`}
                                 className="px-5 py-5"
                               >
-                                <div className="h-4 w-24 animate-pulse rounded-md bg-slate-100" />
+                                <div className="h-4 w-24 animate-pulse rounded-md bg-[var(--surface-alt)]" />
                               </td>
                             ),
                           )}
@@ -1405,7 +1411,7 @@ export default function AdminPaymentsPage() {
                           colSpan={7}
                           className="px-6 py-16 text-center"
                         >
-                          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--surface-alt)] text-[var(--muted-foreground)]">
                             {error ? (
                               <AlertCircle size={25} />
                             ) : (
@@ -1413,13 +1419,13 @@ export default function AdminPaymentsPage() {
                             )}
                           </div>
 
-                          <h4 className="mt-4 text-sm font-bold text-[#102b46]">
+                          <h4 className="mt-4 text-sm font-semibold text-[var(--foreground)]">
                             {error
                               ? "Payments could not be loaded"
                               : "No payment records found"}
                           </h4>
 
-                          <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-slate-500">
+                          <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-[var(--muted-foreground)]">
                             {error
                               ? "Check your admin session and API connection, then try refreshing."
                               : "There are no payments matching these filters. Try a different status or payment method."}
@@ -1433,7 +1439,7 @@ export default function AdminPaymentsPage() {
                                 loadOverview(),
                               ])
                             }
-                            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-[#102b46] transition hover:bg-slate-50"
+                            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)]"
                           >
                             <RefreshCw size={15} />
                             Try again
@@ -1447,11 +1453,11 @@ export default function AdminPaymentsPage() {
                         return (
                           <tr
                             key={payment._id || payment.id}
-                            className="transition hover:bg-[#f8fafc]"
+                            className="transition hover:bg-[var(--background)]"
                           >
                             <td className="px-6 py-4">
                               <div className="flex min-w-[200px] items-center gap-3">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#e8eef5] text-sm font-bold text-[#102b46]">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--gold)]/10 text-sm font-semibold text-[var(--foreground)]">
                                   {getMemberName(payment)
                                     .trim()
                                     .charAt(0)
@@ -1459,10 +1465,10 @@ export default function AdminPaymentsPage() {
                                 </div>
 
                                 <div className="min-w-0">
-                                  <p className="max-w-[190px] truncate text-sm font-semibold text-[#102b46]">
+                                  <p className="max-w-[190px] truncate text-sm font-semibold text-[var(--foreground)]">
                                     {getMemberName(payment)}
                                   </p>
-                                  <p className="mt-1 max-w-[190px] truncate text-xs text-slate-500">
+                                  <p className="mt-1 max-w-[190px] truncate text-xs text-[var(--muted-foreground)]">
                                     {getMemberEmail(payment)}
                                   </p>
                                 </div>
@@ -1471,20 +1477,20 @@ export default function AdminPaymentsPage() {
 
                             <td className="px-5 py-4">
                               <div className="min-w-[190px]">
-                                <p className="max-w-[220px] truncate font-mono text-xs font-semibold text-[#102b46]">
+                                <p className="max-w-[220px] truncate font-mono text-xs font-semibold text-[var(--foreground)]">
                                   {getTransactionReference(payment)}
                                 </p>
-                                <p className="mt-1.5 text-xs text-slate-500">
+                                <p className="mt-1.5 text-xs text-[var(--muted-foreground)]">
                                   {getPlanName(payment)}
                                 </p>
                               </div>
                             </td>
 
                             <td className="whitespace-nowrap px-5 py-4">
-                              <p className="text-sm font-bold text-[#102b46]">
+                              <p className="text-sm font-bold text-[var(--foreground)]">
                                 {formatMoney(getAmount(payment))}
                               </p>
-                              <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                              <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
                                 {payment.currency || "BDT"}
                               </p>
                             </td>
@@ -1498,10 +1504,10 @@ export default function AdminPaymentsPage() {
                             </td>
 
                             <td className="whitespace-nowrap px-5 py-4">
-                              <p className="text-sm font-medium text-slate-700">
+                              <p className="text-sm font-medium text-[var(--foreground)]">
                                 {formatDate(payment.createdAt)}
                               </p>
-                              <p className="mt-1 text-xs text-slate-400">
+                              <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                                 {formatDateTime(payment.createdAt)}
                               </p>
                             </td>
@@ -1514,13 +1520,13 @@ export default function AdminPaymentsPage() {
                                     onClick={() =>
                                       openReview(payment, "approve")
                                     }
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#d6b878]/40 bg-[#f8f3e7] px-3 py-2 text-xs font-bold text-[#76591e] transition hover:border-[#b99a5b] hover:bg-[#efe3c2]"
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--gold)]/35 bg-[var(--gold)]/10 px-3 py-2 text-xs font-semibold text-[var(--foreground)] transition hover:border-[var(--gold)] hover:bg-[var(--gold)]/20"
                                   >
                                     Review
                                     <ArrowRight size={13} />
                                   </button>
                                 ) : (
-                                  <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-400">
+                                  <span className="rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs font-medium text-[var(--muted-foreground)]">
                                     No action
                                   </span>
                                 )}
@@ -1532,7 +1538,7 @@ export default function AdminPaymentsPage() {
                                   onClick={() =>
                                     openReview(payment, "reject")
                                   }
-                                  className="mt-2 block w-full text-right text-[11px] font-medium text-rose-600 transition hover:text-rose-800"
+                                  className="mt-2 block w-full text-right text-[11px] font-medium text-red-600 transition hover:text-red-700 dark:text-red-300 dark:hover:text-red-200"
                                 >
                                   Reject payment
                                 </button>
@@ -1546,25 +1552,25 @@ export default function AdminPaymentsPage() {
                 </table>
               </div>
 
-              <div className="flex flex-col justify-between gap-4 border-t border-slate-200/80 bg-white px-5 py-4 sm:flex-row sm:items-center sm:px-6">
-                <p className="text-xs font-medium text-slate-500">
+              <div className="flex flex-col justify-between gap-4 border-t border-[var(--border)] bg-[var(--surface)] px-5 py-4 sm:flex-row sm:items-center sm:px-6">
+                <p className="text-xs font-medium text-[var(--muted-foreground)]">
                   {pageTotal === 0 ? (
                     "No results"
                   ) : (
                     <>
                       Showing{" "}
-                      <span className="font-bold text-[#102b46]">
+                      <span className="font-semibold text-[var(--foreground)]">
                         {(page - 1) * pagination.limit + 1}
                       </span>
                       {" – "}
-                      <span className="font-bold text-[#102b46]">
+                      <span className="font-semibold text-[var(--foreground)]">
                         {Math.min(
                           page * pagination.limit,
                           pageTotal,
                         )}
                       </span>{" "}
                       of{" "}
-                      <span className="font-bold text-[#102b46]">
+                      <span className="font-semibold text-[var(--foreground)]">
                         {pageTotal}
                       </span>{" "}
                       payments
@@ -1573,7 +1579,7 @@ export default function AdminPaymentsPage() {
                 </p>
 
                 <div className="flex items-center justify-between gap-3 sm:justify-end">
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-[var(--muted-foreground)]">
                     Page {page} of {pagination.totalPages}
                   </span>
 
@@ -1585,7 +1591,7 @@ export default function AdminPaymentsPage() {
                       onClick={() =>
                         setPage((current) => Math.max(1, current - 1))
                       }
-                      className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--foreground)] transition hover:bg-[var(--surface-alt)] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <ChevronLeft size={17} />
                     </button>
@@ -1604,7 +1610,7 @@ export default function AdminPaymentsPage() {
                           ),
                         )
                       }
-                      className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--foreground)] transition hover:bg-[var(--surface-alt)] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <ChevronRight size={17} />
                     </button>
@@ -1614,10 +1620,10 @@ export default function AdminPaymentsPage() {
             </div>
           </section>
 
-          <footer className="flex flex-col justify-between gap-2 py-6 text-xs text-slate-400 sm:flex-row sm:items-center">
+          <footer className="flex flex-col justify-between gap-2 py-6 text-xs text-[var(--muted-foreground)] sm:flex-row sm:items-center">
             <p>Membrix Admin · Payment management</p>
             <p className="flex items-center gap-1.5">
-              <ShieldCheck size={13} className="text-[#b99a5b]" />
+              <ShieldCheck size={13} className="text-[var(--gold)]" />
               Secure admin workspace
             </p>
           </footer>
@@ -1625,20 +1631,20 @@ export default function AdminPaymentsPage() {
       </main>
 
       {selectedPayment && reviewAction && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-[#0b1c2e]/60 p-4 backdrop-blur-[3px]">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-black/55 p-4 backdrop-blur-[3px]">
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="payment-review-title"
-            className="my-auto w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            className="my-auto w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] shadow-2xl"
           >
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
+            <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-5 sm:px-6">
               <div className="flex items-start gap-3">
                 <div
                   className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
                     reviewAction === "approve"
-                      ? "bg-[#f8f3e7] text-[#76591e]"
-                      : "bg-rose-50 text-rose-700"
+                      ? "bg-[var(--gold)]/10 text-[var(--gold)]"
+                      : "bg-red-500/10 text-red-600 dark:text-red-300"
                   }`}
                 >
                   {reviewAction === "approve" ? (
@@ -1651,14 +1657,14 @@ export default function AdminPaymentsPage() {
                 <div>
                   <h2
                     id="payment-review-title"
-                    className="text-lg font-bold text-[#102b46]"
+                    className="text-lg font-semibold text-[var(--foreground)]"
                   >
                     {reviewAction === "approve"
                       ? "Approve payment"
                       : "Reject payment"}
                   </h2>
 
-                  <p className="mt-1 text-sm leading-5 text-slate-500">
+                  <p className="mt-1 text-sm leading-5 text-[var(--muted-foreground)]">
                     {reviewAction === "approve"
                       ? "Confirm that the manual payment has been verified."
                       : "Record the reason for rejecting this manual payment."}
@@ -1671,7 +1677,7 @@ export default function AdminPaymentsPage() {
                 aria-label="Close review dialog"
                 disabled={reviewing}
                 onClick={closeReview}
-                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                className="rounded-lg p-2 text-[var(--muted-foreground)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)] disabled:opacity-50"
               >
                 <X size={18} />
               </button>
@@ -1679,41 +1685,41 @@ export default function AdminPaymentsPage() {
 
             <form onSubmit={submitReview}>
               <div className="space-y-4 px-5 py-5 sm:px-6">
-                <div className="rounded-xl border border-slate-200 bg-[#f8fafc] p-4">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-xs font-medium text-slate-500">
+                      <p className="text-xs font-medium text-[var(--muted-foreground)]">
                         Member
                       </p>
-                      <p className="mt-1 truncate text-sm font-bold text-[#102b46]">
+                      <p className="mt-1 truncate text-sm font-semibold text-[var(--foreground)]">
                         {getMemberName(selectedPayment)}
                       </p>
-                      <p className="mt-1 truncate text-xs text-slate-500">
+                      <p className="mt-1 truncate text-xs text-[var(--muted-foreground)]">
                         {getMemberEmail(selectedPayment)}
                       </p>
                     </div>
 
                     <div className="text-right">
-                      <p className="text-xs font-medium text-slate-500">
+                      <p className="text-xs font-medium text-[var(--muted-foreground)]">
                         Amount
                       </p>
-                      <p className="mt-1 whitespace-nowrap text-lg font-bold text-[#102b46]">
+                      <p className="mt-1 whitespace-nowrap text-lg font-semibold text-[var(--foreground)]">
                         {formatMoney(getAmount(selectedPayment))}
                       </p>
                     </div>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+                  <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-3">
                     <MethodBadge method={selectedPayment.method} />
                     <StatusBadge status={selectedPayment.status} />
                   </div>
 
-                  <p className="mt-3 break-all font-mono text-[11px] leading-5 text-slate-500">
+                  <p className="mt-3 break-all font-mono text-[11px] leading-5 text-[var(--muted-foreground)]">
                     Reference: {getTransactionReference(selectedPayment)}
                   </p>
 
                   {selectedPayment.payerNumber && (
-                    <p className="mt-1 font-mono text-[11px] leading-5 text-slate-500">
+                    <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--muted-foreground)]">
                       Payer number: {selectedPayment.payerNumber}
                     </p>
                   )}
@@ -1724,21 +1730,21 @@ export default function AdminPaymentsPage() {
                     href={selectedPayment.proofUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-2 text-sm font-semibold text-[#76591e] underline-offset-4 hover:underline"
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--gold)] underline-offset-4 hover:underline"
                   >
                     View payment proof
                     <ArrowRight size={14} />
                   </a>
                 ) : (
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-[var(--muted-foreground)]">
                     Payment proof: No file attached (proof upload is currently unavailable)
                   </p>
                 )}
 
                 <label className="block">
-                  <span className="mb-2 block text-sm font-semibold text-[#102b46]">
+                  <span className="mb-2 block text-sm font-semibold text-[var(--foreground)]">
                     Admin note{" "}
-                    <span className="font-normal text-slate-400">
+                    <span className="font-normal text-[var(--muted-foreground)]">
                       (optional)
                     </span>
                   </span>
@@ -1755,10 +1761,10 @@ export default function AdminPaymentsPage() {
                         ? "Add an internal verification note..."
                         : "Explain why this payment is being rejected..."
                     }
-                    className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm leading-6 text-[#102b46] outline-none transition placeholder:text-slate-400 focus:border-[#b99a5b] focus:ring-2 focus:ring-[#d6b878]/15"
+                    className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 py-3 text-sm leading-6 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted-foreground)] focus:border-[var(--gold)] focus:ring-2 focus:ring-[var(--gold)]/15"
                   />
 
-                  <span className="mt-1.5 block text-right text-[11px] text-slate-400">
+                  <span className="mt-1.5 block text-right text-[11px] text-[var(--muted-foreground)]">
                     {adminNote.length}/1000 characters
                   </span>
                 </label>
@@ -1766,8 +1772,8 @@ export default function AdminPaymentsPage() {
                 <div
                   className={`rounded-xl border px-3.5 py-3 text-xs leading-5 ${
                     reviewAction === "approve"
-                      ? "border-[#d6b878]/40 bg-[#f8f3e7] text-[#76591e]"
-                      : "border-rose-200 bg-rose-50 text-rose-800"
+                      ? "border-[var(--gold)]/35 bg-[var(--gold)]/10 text-[var(--foreground)]"
+                      : "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300"
                   }`}
                 >
                   {reviewAction === "approve" ? (
@@ -1795,12 +1801,12 @@ export default function AdminPaymentsPage() {
                 </div>
               </div>
 
-              <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-[#fafbfd] px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
+              <div className="flex flex-col-reverse gap-2 border-t border-[var(--border)] bg-[var(--surface)] px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
                 <button
                   type="button"
                   disabled={reviewing}
                   onClick={closeReview}
-                  className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+                  className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-alt)] disabled:opacity-60"
                 >
                   Cancel
                 </button>
@@ -1810,10 +1816,10 @@ export default function AdminPaymentsPage() {
                   disabled={
                     reviewing || !canReviewPayment(selectedPayment)
                   }
-                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                     reviewAction === "approve"
-                      ? "bg-[#102b46] hover:bg-[#193c5e]"
-                      : "bg-rose-600 hover:bg-rose-700"
+                      ? "bg-[var(--gold)] text-[var(--gold-contrast)] hover:brightness-105"
+                      : "bg-red-600 text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-400"
                   }`}
                 >
                   {reviewing ? (
