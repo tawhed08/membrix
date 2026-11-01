@@ -967,16 +967,34 @@ export default function DashboardPage() {
       await Promise.all(
         images.map(async (image) => {
           if (!image.complete) {
-            await new Promise<void>((resolve) => {
+            await new Promise<void>((resolve, reject) => {
               image.onload = () => resolve();
-              image.onerror = () => resolve();
+              image.onerror = () =>
+                reject(new Error("A certificate image could not be loaded."));
             });
+          }
+
+          if (image.naturalWidth === 0) {
+            throw new Error("A certificate image could not be loaded.");
+          }
+
+          if (typeof image.decode === "function") {
+            await image.decode();
           }
         }),
       );
 
+      const captureWidth = 1122;
+      const captureHeight = 794;
+
       const canvas = await html2canvas(certificateElement, {
-        scale: 3,
+        width: captureWidth,
+        height: captureHeight,
+        windowWidth: captureWidth,
+        windowHeight: captureHeight,
+        scrollX: 0,
+        scrollY: 0,
+        scale: 2,
         useCORS: true,
         backgroundColor: "#ffffff",
         logging: false,
@@ -986,7 +1004,74 @@ export default function DashboardPage() {
               "membership-certificate",
             );
 
-          if (!clonedCertificate) return;
+          if (!clonedCertificate) {
+            throw new Error("Certificate capture layout is unavailable.");
+          }
+
+          clonedCertificate.style.setProperty("position", "fixed", "important");
+          clonedCertificate.style.setProperty("top", "0", "important");
+          clonedCertificate.style.setProperty("left", "0", "important");
+          clonedCertificate.style.setProperty("width", `${captureWidth}px`, "important");
+          clonedCertificate.style.setProperty("height", `${captureHeight}px`, "important");
+          clonedCertificate.style.setProperty("min-width", `${captureWidth}px`, "important");
+          clonedCertificate.style.setProperty("max-width", "none", "important");
+          clonedCertificate.style.setProperty("min-height", `${captureHeight}px`, "important");
+          clonedCertificate.style.setProperty("max-height", `${captureHeight}px`, "important");
+          clonedCertificate.style.setProperty("box-sizing", "border-box", "important");
+          clonedCertificate.style.setProperty("padding", "42px 58px", "important");
+          clonedCertificate.style.setProperty("overflow", "hidden", "important");
+
+          const captureContent = clonedCertificate.querySelector<HTMLElement>(
+            "[data-certificate-content]",
+          );
+          captureContent?.style.setProperty("width", "100%", "important");
+
+          const compactStyles: Array<[string, string, string]> = [
+            ["[data-certificate-emblem]", "width", "40px"],
+            ["[data-certificate-emblem]", "height", "40px"],
+            ["[data-certificate-eyebrow]", "margin-top", "10px"],
+            ["[data-certificate-title]", "margin-top", "8px"],
+            ["[data-certificate-title]", "font-size", "30px"],
+            ["[data-certificate-divider]", "margin-top", "10px"],
+            ["[data-certificate-intro]", "margin-top", "12px"],
+            ["[data-certificate-name]", "margin-top", "4px"],
+            ["[data-certificate-name]", "font-size", "26px"],
+            ["[data-certificate-description]", "margin-top", "8px"],
+            ["[data-certificate-description]", "font-size", "12px"],
+            ["[data-certificate-details]", "margin-top", "20px"],
+            ["[data-certificate-details]", "display", "grid"],
+            ["[data-certificate-details]", "grid-template-columns", "repeat(3, minmax(0, 1fr))"],
+            ["[data-certificate-details]", "gap", "12px"],
+            ["[data-certificate-detail-card]", "min-width", "0"],
+            ["[data-certificate-detail-card]", "padding", "10px 14px"],
+            ["[data-certificate-detail-value]", "font-size", "13px"],
+            ["[data-certificate-detail-value]", "line-height", "1.25"],
+            ["[data-certificate-detail-value]", "overflow-wrap", "anywhere"],
+            ["[data-certificate-footer]", "margin-top", "18px"],
+            ["[data-certificate-footer]", "padding-top", "14px"],
+            ["[data-certificate-footer]", "display", "grid"],
+            ["[data-certificate-footer]", "grid-template-columns", "1fr 150px 1fr"],
+            ["[data-certificate-footer]", "align-items", "center"],
+            ["[data-certificate-footer]", "gap", "16px"],
+            ["[data-certificate-reference]", "text-align", "left"],
+            ["[data-certificate-qr]", "justify-self", "center"],
+            ["[data-certificate-qr-frame]", "width", "108px"],
+            ["[data-certificate-qr-frame]", "height", "108px"],
+            ["[data-certificate-qr-frame]", "padding", "6px"],
+            ["[data-certificate-qr-image]", "width", "96px"],
+            ["[data-certificate-qr-image]", "height", "96px"],
+            ["[data-certificate-qr-label]", "margin-top", "4px"],
+            ["[data-certificate-signature]", "text-align", "right"],
+            ["[data-certificate-signature-line]", "margin-left", "auto"],
+          ];
+
+          compactStyles.forEach(([selector, property, value]) => {
+            clonedCertificate
+              .querySelectorAll<HTMLElement>(selector)
+              .forEach((element) =>
+                element.style.setProperty(property, value, "important"),
+              );
+          });
 
           const elements = [
             clonedCertificate,
@@ -998,14 +1083,26 @@ export default function DashboardPage() {
 
             htmlElement.style.setProperty("color", "#29251f");
             htmlElement.style.setProperty(
-              "background-color",
-              "#ffffff",
-            );
-            htmlElement.style.setProperty(
               "border-color",
               "#b89450",
             );
           });
+
+          clonedCertificate.style.setProperty(
+            "background-color",
+            "#ffffff",
+            "important",
+          );
+          clonedCertificate
+            .querySelectorAll<HTMLElement>("[data-certificate-detail-card]")
+            .forEach((card) =>
+              card.style.setProperty("background-color", "#f7f3e9", "important"),
+            );
+          clonedCertificate
+            .querySelectorAll<HTMLElement>("[data-certificate-qr-frame]")
+            .forEach((frame) =>
+              frame.style.setProperty("background-color", "#ffffff", "important"),
+            );
         },
       });
 
@@ -1040,6 +1137,10 @@ export default function DashboardPage() {
         width,
         height,
       );
+
+      if (pdf.getNumberOfPages() !== 1) {
+        throw new Error("Certificate PDF must contain exactly one page.");
+      }
 
       pdf.save(
         `${certificateData?.certificateId || "Membrix-Certificate"}.pdf`,
@@ -3444,71 +3545,117 @@ export default function DashboardPage() {
                       >
                         <div className="pointer-events-none absolute inset-2 border border-[var(--gold)]/20" />
 
-                        <div className="relative text-center">
-                          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border-2 border-[var(--gold)] text-[var(--gold)]">
+                        <div
+                          data-certificate-content
+                          className="relative text-center"
+                        >
+                          <div
+                            data-certificate-emblem
+                            className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border-2 border-[var(--gold)] text-[var(--gold)]"
+                          >
                             <FileBadge size={25} />
                           </div>
 
-                          <p className="mt-4 text-xs font-bold tracking-[0.35em] text-[var(--gold)]">
+                          <p
+                            data-certificate-eyebrow
+                            className="mt-4 text-xs font-bold tracking-[0.35em] text-[var(--gold)]"
+                          >
                             MEMBRIX MEMBERSHIP
                           </p>
 
                           <h2
+                            data-certificate-title
                             id="membership-certificate-title"
                             className="mt-3 font-serif text-2xl font-bold tracking-wide text-[var(--foreground)] sm:text-4xl"
                           >
                             Certificate of Membership
                           </h2>
 
-                          <div className="mx-auto mt-4 h-1 w-20 rounded-full bg-[var(--gold)]" />
+                          <div
+                            data-certificate-divider
+                            className="mx-auto mt-4 h-1 w-20 rounded-full bg-[var(--gold)]"
+                          />
 
-                          <p className="mt-5 text-sm text-[var(--muted-foreground)]">
+                          <p
+                            data-certificate-intro
+                            className="mt-5 text-sm text-[var(--muted-foreground)]"
+                          >
                             This certificate is presented to
                           </p>
 
-                          <h3 className="mt-2 break-words text-2xl font-semibold text-[var(--foreground)] sm:text-3xl">
+                          <h3
+                            data-certificate-name
+                            className="mt-2 break-words text-2xl font-semibold text-[var(--foreground)] sm:text-3xl"
+                          >
                             {profile.name || "Membrix Member"}
                           </h3>
 
-                          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[var(--muted-foreground)]">
+                          <p
+                            data-certificate-description
+                            className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[var(--muted-foreground)]"
+                          >
                             In recognition of their membership and
                             participation in the Membrix community.
                           </p>
 
-                          <div className="mt-7 grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
-                            <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
+                          <div
+                            data-certificate-details
+                            className="mt-7 grid grid-cols-1 gap-3 text-left sm:grid-cols-3"
+                          >
+                            <div
+                              data-certificate-detail-card
+                              className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3"
+                            >
                               <p className="text-[10px] font-bold tracking-wider text-[var(--muted-foreground)]">
                                 MEMBERSHIP ID
                               </p>
 
-                              <p className="mt-1 break-all text-sm font-semibold text-[var(--foreground)]">
+                              <p
+                                data-certificate-detail-value
+                                className="mt-1 break-all text-sm font-semibold text-[var(--foreground)]"
+                              >
                                 {certificateData.membership.membershipId}
                               </p>
                             </div>
 
-                            <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
+                            <div
+                              data-certificate-detail-card
+                              className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3"
+                            >
                               <p className="text-[10px] font-bold tracking-wider text-[var(--muted-foreground)]">
                                 MEMBERSHIP TYPE
                               </p>
 
-                              <p className="mt-1 text-sm font-semibold text-[var(--foreground)]">
+                              <p
+                                data-certificate-detail-value
+                                className="mt-1 text-sm font-semibold text-[var(--foreground)]"
+                              >
                                 {certificateData.membership.plan}
                               </p>
                             </div>
 
-                            <div className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3">
+                            <div
+                              data-certificate-detail-card
+                              className="border-t-2 border-[var(--gold)] bg-[var(--surface-alt)] p-3"
+                            >
                               <p className="text-[10px] font-bold tracking-wider text-[var(--muted-foreground)]">
                                 CERTIFICATE STATUS
                               </p>
 
-                              <p className="mt-1 text-sm font-semibold text-emerald-600">
+                              <p
+                                data-certificate-detail-value
+                                className="mt-1 text-sm font-semibold text-emerald-600"
+                              >
                                 {certificateData.status.toUpperCase()}
                               </p>
                             </div>
                           </div>
 
-                          <div className="mt-7 flex flex-col items-center justify-between gap-6 border-t border-[var(--border)] pt-5 sm:flex-row">
-                            <div className="text-center sm:text-left">
+                          <div
+                            data-certificate-footer
+                            className="mt-7 flex flex-col items-center justify-between gap-6 border-t border-[var(--border)] pt-5 sm:flex-row"
+                          >
+                            <div data-certificate-reference className="text-center sm:text-left">
                               <p className="text-xs text-[var(--muted-foreground)]">
                                 Certificate reference
                               </p>
@@ -3525,25 +3672,35 @@ export default function DashboardPage() {
                               </p>
                             </div>
 
-                            <div className="flex flex-col items-center">
-                              <div className="rounded-xl border border-[var(--gold)]/30 bg-white p-2">
+                            <div data-certificate-qr className="flex flex-col items-center">
+                              <div
+                                data-certificate-qr-frame
+                                className="rounded-xl border border-[var(--gold)]/30 bg-white p-2"
+                              >
                                 <Image
                                   src={certificateData.qrCode}
                                   alt="Certificate verification QR code"
                                   width={112}
                                   height={112}
                                   unoptimized
-                                  className="h-28 w-28"
+                                  data-certificate-qr-image
+                                  className="h-full w-full object-contain"
                                 />
                               </div>
 
-                              <p className="mt-2 text-[10px] font-semibold tracking-wider text-[var(--muted-foreground)]">
+                              <p
+                                data-certificate-qr-label
+                                className="mt-2 text-[10px] font-semibold tracking-wider text-[var(--muted-foreground)]"
+                              >
                                 SCAN TO VERIFY
                               </p>
                             </div>
 
-                            <div className="text-center">
-                              <div className="mx-auto w-32 border-b border-[var(--border)] pb-2 font-serif italic text-[var(--foreground)]">
+                            <div data-certificate-signature className="text-center">
+                              <div
+                                data-certificate-signature-line
+                                className="mx-auto w-32 border-b border-[var(--border)] pb-2 font-serif italic text-[var(--foreground)]"
+                              >
                                 Membrix
                               </div>
 
