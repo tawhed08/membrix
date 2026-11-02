@@ -824,6 +824,14 @@ export default function AdminPage() {
                 Manage members
                 <ArrowRight size={14} />
               </Link>
+              <Link
+                href="/admin/certificates"
+                className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:border-[#d6b878]/60 hover:text-[#a98843]"
+              >
+                <BadgeCheck size={16} className="text-[#b99a5b]" />
+                Manage certificates
+                <ArrowRight size={14} />
+              </Link>
 
               <Link
                 href="/admin/payments"

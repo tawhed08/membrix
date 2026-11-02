@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import gsap from "gsap";
+import { isManualPaymentReviewable } from "@/lib/admin-payment-management";
 import {
   Activity,
   AlertCircle,
@@ -27,7 +28,6 @@ import {
   Clock3,
   CreditCard,
   FileSearch,
-  Filter,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -370,20 +370,7 @@ function getTransactionReference(payment: PaymentRecord): string {
 }
 
 function canReviewPayment(payment: PaymentRecord): boolean {
-  const status = normalizeStatus(payment.status);
-  const method = normalizeMethod(payment.method);
-
-  const manualMethod = [
-    "bkash",
-    "nagad",
-    "bank",
-    "bank_transfer",
-  ].includes(method);
-
-  return (
-    manualMethod &&
-    (status === "pending" || status === "processing")
-  );
+  return isManualPaymentReviewable(payment);
 }
 
 function getErrorMessage(
@@ -501,6 +488,7 @@ export default function AdminPaymentsPage() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [admin, setAdmin] = useState<AdminUser | null>(null);
+  const paymentRequestId = useRef(0);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [pagination, setPagination] =
     useState<Pagination>(INITIAL_PAGINATION);
@@ -586,6 +574,7 @@ export default function AdminPaymentsPage() {
   }, [router]);
 
   const loadPayments = useCallback(async () => {
+    const requestId = ++paymentRequestId.current;
     setLoading(true);
     setError("");
 
@@ -607,6 +596,8 @@ export default function AdminPaymentsPage() {
           cache: "no-store",
         },
       );
+
+      if (requestId !== paymentRequestId.current) return;
 
       if (response.status === 401) {
         router.replace("/login");
@@ -637,6 +628,8 @@ export default function AdminPaymentsPage() {
         paginationData.limit ?? INITIAL_PAGINATION.limit,
       );
 
+      if (requestId !== paymentRequestId.current) return;
+
       setPayments(records);
 
       setPagination({
@@ -652,6 +645,7 @@ export default function AdminPaymentsPage() {
         ),
       });
     } catch (fetchError) {
+      if (requestId !== paymentRequestId.current) return;
       setPayments([]);
       setPagination(INITIAL_PAGINATION);
 
@@ -661,7 +655,9 @@ export default function AdminPaymentsPage() {
           : "Unable to connect to the payment API.",
       );
     } finally {
-      setLoading(false);
+      if (requestId === paymentRequestId.current) {
+        setLoading(false);
+      }
     }
   }, [router, method, page, search, status]);
 
@@ -1258,7 +1254,7 @@ export default function AdminPaymentsPage() {
 
               <form
                 onSubmit={handleSearch}
-                className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.5fr)_minmax(170px,0.8fr)_minmax(180px,0.9fr)_auto] xl:items-center"
+                className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1.5fr)_minmax(180px,0.9fr)_auto] xl:items-center"
               >
                 <label className="flex h-11 min-w-0 items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 transition focus-within:border-[var(--gold)] focus-within:ring-2 focus-within:ring-[var(--gold)]/15">
                   <Search
@@ -1274,43 +1270,6 @@ export default function AdminPaymentsPage() {
                     placeholder="Search transactions or members..."
                     className="min-w-0 flex-1 bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]"
                   />
-                </label>
-
-                <label className="flex h-11 min-w-0 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 transition focus-within:border-[var(--gold)] focus-within:ring-2 focus-within:ring-[var(--gold)]/15">
-                  <Filter
-                    size={15}
-                    className="shrink-0 text-[var(--muted-foreground)]"
-                  />
-
-                  <span className="shrink-0 text-xs font-semibold text-[var(--muted-foreground)]">
-                    Status
-                  </span>
-
-                  <span className="relative min-w-0 flex-1">
-                    <select
-                      aria-label="Filter by payment status"
-                      value={status}
-                      onChange={(event) => {
-                        setStatus(
-                          event.target.value as PaymentStatusFilter,
-                        );
-                        setPage(1);
-                      }}
-                      className="w-full cursor-pointer appearance-none bg-transparent py-1 pr-5 text-sm font-semibold text-[var(--foreground)] outline-none"
-                    >
-                      <option value="all">All statuses</option>
-                      {STATUS_OPTIONS.map((item) => (
-                        <option key={item.value} value={item.value}>
-                          {item.label}
-                        </option>
-                      ))}
-                    </select>
-
-                    <ChevronDown
-                      size={14}
-                      className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]"
-                    />
-                  </span>
                 </label>
 
                 <label className="flex h-11 min-w-0 items-center gap-2 rounded-xl border border-[var(--gold)]/35 bg-[var(--gold)]/10 px-3 transition hover:border-[var(--gold)] focus-within:ring-2 focus-within:ring-[var(--gold)]/20">
@@ -1358,6 +1317,36 @@ export default function AdminPaymentsPage() {
                   Search
                 </button>
               </form>
+
+              <div
+                className="mt-4 flex gap-2 overflow-x-auto pb-1"
+                aria-label="Filter payments by status"
+              >
+                {[
+                  { value: "all" as const, label: "All" },
+                  ...STATUS_OPTIONS,
+                ].map((item) => {
+                  const selected = status === item.value;
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        setStatus(item.value);
+                        setPage(1);
+                      }}
+                      className={`shrink-0 rounded-full border px-3.5 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--gold)] ${
+                        selected
+                          ? "border-[var(--gold)] bg-[var(--gold)]/15 text-[var(--foreground)]"
+                          : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted-foreground)] hover:bg-[var(--surface-alt)]"
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="relative">
@@ -1527,7 +1516,9 @@ export default function AdminPaymentsPage() {
                                   </button>
                                 ) : (
                                   <span className="rounded-lg border border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-xs font-medium text-[var(--muted-foreground)]">
-                                    No action
+                                    <span title="This payment status or method cannot be manually reviewed.">
+                                      No action
+                                    </span>
                                   </span>
                                 )}
                               </div>

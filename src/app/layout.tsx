@@ -1,5 +1,6 @@
 
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeToggle from "@/components/theme-toggle";
@@ -52,9 +53,13 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
 <body className="min-h-full">
-  <SiteHeader />
+  <Suspense fallback={null}>
+    <SiteHeader />
+  </Suspense>
   {children}
-  <ThemeToggle />
+  <Suspense fallback={null}>
+    <ThemeToggle />
+  </Suspense>
 </body>
     </html>
   );

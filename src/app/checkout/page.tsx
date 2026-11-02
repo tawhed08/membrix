@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Clock3,
   CreditCard,
+  Download,
   LoaderCircle,
   LockKeyhole,
   ShieldCheck,
@@ -26,6 +27,7 @@ import {
   Wallet,
   X,
 } from "lucide-react";
+import { downloadPaymentReceipt } from "@/lib/payment-receipt";
 
 const API_URL = (
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
@@ -66,7 +68,22 @@ type ApiResponse = {
   };
   paymentUrl?: string;
   transactionId?: string;
+  settings?: {
+    bkashNumber: string;
+    nagadNumber: string;
+    bankAccountName: string;
+    bankName: string;
+    bankAccountNumber: string;
+    bankBranch: string;
+    bankAccountType: string;
+    paymentInstructions: string;
+    enabled: { bkash: boolean; nagad: boolean; bank: boolean };
+  };
+  availableManualMethods?: Array<"bkash" | "nagad" | "bank">;
+  gateway?: { enabled: boolean; configured: boolean; mode: "sandbox" | "live"; recurringBillingAvailable: boolean };
 };
+
+type PaymentConfiguration = NonNullable<ApiResponse["settings"]>;
 
 type SubmissionDetails = {
   transactionId: string;
@@ -156,6 +173,7 @@ function CheckoutContent() {
 
   const requestedPlan =
     searchParams.get("plan")?.trim().toLowerCase() ?? "";
+  const renewalMembershipId = searchParams.get("renew")?.trim() ?? "";
 
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [selectedPlanSlug, setSelectedPlanSlug] =
@@ -163,6 +181,14 @@ function CheckoutContent() {
 
   const [isLoadingPlans, setIsLoadingPlans] = useState(true);
   const [plansError, setPlansError] = useState("");
+  const [paymentConfiguration, setPaymentConfiguration] =
+    useState<PaymentConfiguration | null>(null);
+  const [availableManualMethods, setAvailableManualMethods] = useState<
+    Array<"bkash" | "nagad" | "bank">
+  >([]);
+  const [gatewayConfigured, setGatewayConfigured] = useState(false);
+  const [gatewayMode, setGatewayMode] = useState<"sandbox" | "live">("sandbox");
+  const [paymentConfigurationError, setPaymentConfigurationError] = useState("");
 
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentMethod>("bkash");
@@ -176,6 +202,9 @@ function CheckoutContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionDetails, setSubmissionDetails] =
     useState<SubmissionDetails | null>(null);
+  const [submissionReceiptLoading, setSubmissionReceiptLoading] =
+    useState(false);
+  const [submissionReceiptError, setSubmissionReceiptError] = useState("");
 
   const effectivePlanSlug =
     selectedPlanSlug || plans[0]?.slug || "";
@@ -185,6 +214,11 @@ function CheckoutContent() {
   );
 
   const isManualPayment = paymentMethod !== "online";
+  const availablePaymentMethods = paymentMethods.filter((method) =>
+    method.id === "online"
+      ? gatewayConfigured
+      : availableManualMethods.includes(method.id),
+  );
 
   // Load active membership plans from the backend.
   useEffect(() => {
@@ -232,9 +266,13 @@ function CheckoutContent() {
             Array.isArray(item.features),
         );
 
-        setPlans(activePlans);
+        const checkoutPlans = renewalMembershipId
+          ? activePlans.filter((item) => item.slug === requestedPlan)
+          : activePlans;
+        setPlans(checkoutPlans);
 
         setSelectedPlanSlug((current) => {
+          if (renewalMembershipId) return requestedPlan;
           if (current) {
             return current;
           }
@@ -259,6 +297,52 @@ function CheckoutContent() {
 
     void loadPlans();
 
+    return () => controller.abort();
+  }, [renewalMembershipId, requestedPlan]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadPaymentConfiguration() {
+      try {
+        const response = await fetch(`${API_URL}/api/payment-settings`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = await readApiResponse(response);
+        if (!response.ok || !result.success || !result.settings) {
+          throw new Error(result.message || "Unable to load payment instructions.");
+        }
+        setPaymentConfiguration(result.settings);
+        setAvailableManualMethods(
+          Array.isArray(result.availableManualMethods)
+            ? result.availableManualMethods.filter(
+                (method): method is "bkash" | "nagad" | "bank" =>
+                  method === "bkash" || method === "nagad" || method === "bank",
+              )
+            : [],
+        );
+        setGatewayConfigured(
+          result.gateway?.enabled === true &&
+            result.gateway.configured === true,
+        );
+        setGatewayMode(result.gateway?.mode ?? "sandbox");
+        setPaymentConfigurationError("");
+        const available = paymentMethods.filter((method) =>
+          method.id === "online"
+            ? result.gateway?.enabled === true &&
+              result.gateway.configured === true
+            : result.settings?.enabled[method.id] === true,
+        );
+        if (available.length > 0) setPaymentMethod(available[0].id);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setPaymentConfigurationError(
+            error instanceof Error ? error.message : "Unable to load payment instructions.",
+          );
+        }
+      }
+    }
+    void loadPaymentConfiguration();
     return () => controller.abort();
   }, []);
 
@@ -305,6 +389,32 @@ function CheckoutContent() {
     setSubmissionDetails(null);
   }
 
+  async function handleDownloadSubmissionReceipt() {
+    if (
+      !submissionDetails?.paymentId ||
+      submissionReceiptLoading
+    ) {
+      return;
+    }
+    setSubmissionReceiptLoading(true);
+    setSubmissionReceiptError("");
+    try {
+      await downloadPaymentReceipt(
+        API_URL,
+        submissionDetails.paymentId,
+        "submission",
+      );
+    } catch (error) {
+      setSubmissionReceiptError(
+        error instanceof Error
+          ? error.message
+          : "Unable to download the submission receipt.",
+      );
+    } finally {
+      setSubmissionReceiptLoading(false);
+    }
+  }
+
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>,
   ) {
@@ -343,11 +453,15 @@ function CheckoutContent() {
         return;
       }
 
-      if (cleanPayerNumber.length > 30) {
+      if (cleanPayerNumber.length > 60) {
         showNotice(
           "error",
-          "Payer number must not exceed 30 characters.",
+          "Sender number or account must not exceed 60 characters.",
         );
+        return;
+      }
+      if (cleanPayerNumber.length < 3) {
+        showNotice("error", "Enter the sender number or account used for this payment.");
         return;
       }
     }
@@ -369,6 +483,8 @@ function CheckoutContent() {
             },
             body: JSON.stringify({
               planSlug: plan.slug,
+              amount: plan.price,
+              ...(renewalMembershipId ? { renewalMembershipId } : {}),
             }),
           },
         );
@@ -399,10 +515,10 @@ function CheckoutContent() {
           throw new Error("The payment gateway URL is invalid.");
         }
 
-        // Only allow the configured AamarPay sandbox hostname.
+        // Only allow the known AamarPay sandbox and live hosts.
         if (
           paymentUrl.protocol !== "https:" ||
-          paymentUrl.hostname !== "sandbox.aamarpay.com"
+          !["sandbox.aamarpay.com", "secure.aamarpay.com"].includes(paymentUrl.hostname)
         ) {
           throw new Error(
             "The payment gateway URL is not an approved sandbox address.",
@@ -424,9 +540,11 @@ function CheckoutContent() {
           },
           body: JSON.stringify({
             planSlug: plan.slug,
+            amount: plan.price,
             method: paymentMethod,
             transactionId: cleanTransactionId,
             payerNumber: cleanPayerNumber,
+            ...(renewalMembershipId ? { renewalMembershipId } : {}),
           }),
         },
       );
@@ -508,7 +626,7 @@ function CheckoutContent() {
           </div>
 
           <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
-            Complete your{" "}
+            {renewalMembershipId ? "Renew your" : "Complete your"}{" "}
             <span className="text-[#b88b48]">membership.</span>
           </h1>
 
@@ -531,8 +649,8 @@ function CheckoutContent() {
             </p>
 
             <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-              Online payments are currently configured for AamarPay
-              sandbox testing. Manual payments require administrator
+              Online payments use the configured AamarPay environment.
+              Manual payments require administrator
               verification before membership activation. Do not send
               money until official payment instructions are provided.
             </p>
@@ -620,7 +738,7 @@ function CheckoutContent() {
                         <button
                           key={item._id}
                           type="button"
-                          disabled={isSubmitting}
+                          disabled={isSubmitting || Boolean(renewalMembershipId)}
                           onClick={() =>
                             handlePlanChange(item.slug)
                           }
@@ -692,8 +810,17 @@ function CheckoutContent() {
                 </div>
               </div>
 
+              {paymentConfigurationError ? (
+                <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-600">
+                  {paymentConfigurationError}
+                </p>
+              ) : availablePaymentMethods.length === 0 ? (
+                <p role="status" className="rounded-xl border border-[var(--border)] p-4 text-sm leading-6 text-[var(--muted)]">
+                  No payment methods are currently available. Please contact Membrix support.
+                </p>
+              ) : (
               <div className="grid gap-3 sm:grid-cols-2">
-                {paymentMethods.map((method) => {
+                {availablePaymentMethods.map((method) => {
                   const Icon = method.icon;
                   const isSelected = paymentMethod === method.id;
 
@@ -742,6 +869,7 @@ function CheckoutContent() {
                   );
                 })}
               </div>
+              )}
 
               {/* Manual payment fields */}
               {isManualPayment ? (
@@ -752,17 +880,46 @@ function CheckoutContent() {
                     </h3>
 
                     <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-                      Submit your transaction reference for
-                      administrator review. Official recipient account
-                      instructions must be provided by Membrix before
-                      you transfer any money.
+                      Send the exact amount to the verified recipient below, then submit your reference for administrator review.
                     </p>
                   </div>
+
+                  {paymentConfiguration && (
+                    <div className="rounded-2xl border border-[#b88b48]/25 bg-[#b88b48]/5 p-4 text-sm">
+                      {paymentMethod === "bkash" && <p><span className="font-semibold">bKash recipient:</span> {paymentConfiguration.bkashNumber}</p>}
+                      {paymentMethod === "nagad" && <p><span className="font-semibold">Nagad recipient:</span> {paymentConfiguration.nagadNumber}</p>}
+                      {paymentMethod === "bank" && (
+                        <div className="space-y-1">
+                          <p><span className="font-semibold">Account name:</span> {paymentConfiguration.bankAccountName}</p>
+                          <p><span className="font-semibold">Bank:</span> {paymentConfiguration.bankName}</p>
+                          <p><span className="font-semibold">Account number:</span> {paymentConfiguration.bankAccountNumber}</p>
+                          {paymentConfiguration.bankBranch && <p><span className="font-semibold">Branch:</span> {paymentConfiguration.bankBranch}</p>}
+                          {paymentConfiguration.bankAccountType && <p><span className="font-semibold">Account type:</span> {paymentConfiguration.bankAccountType}</p>}
+                        </div>
+                      )}
+                      {paymentConfiguration.paymentInstructions && <p className="mt-3 whitespace-pre-wrap border-t border-[#b88b48]/20 pt-3 leading-6">{paymentConfiguration.paymentInstructions}</p>}
+                    </div>
+                  )}
 
                   <div className="grid gap-5 sm:grid-cols-2">
                     <label className="block">
                       <span className="mb-2 block text-sm font-medium">
-                        Transaction ID
+                        Amount
+                      </span>
+                      <input
+                        type="number"
+                        value={plan?.price ?? ""}
+                        readOnly
+                        aria-readonly="true"
+                        className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-4 py-3 text-sm text-[var(--foreground)]"
+                      />
+                      <span className="mt-1 block text-xs text-[var(--muted)]">
+                        Must match the selected plan price.
+                      </span>
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-medium">
+                        {paymentMethod === "bank" ? "Transfer reference" : "Transaction ID"}
                         <span className="ml-1 text-xs text-red-500">
                           *
                         </span>
@@ -779,7 +936,7 @@ function CheckoutContent() {
                         required
                         minLength={3}
                         maxLength={120}
-                        placeholder="Enter your transaction ID"
+                        placeholder={paymentMethod === "bank" ? "Enter the bank transfer reference" : "Enter your transaction ID"}
                         autoComplete="off"
                         className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus:border-[#b88b48] focus:ring-2 focus:ring-[#b88b48]/15 disabled:opacity-60"
                       />
@@ -787,9 +944,9 @@ function CheckoutContent() {
 
                     <label className="block">
                       <span className="mb-2 block text-sm font-medium">
-                        Payer number
+                        Sender number/account
                         <span className="ml-1 text-xs text-[var(--muted)]">
-                          (optional)
+                          *
                         </span>
                       </span>
 
@@ -801,15 +958,16 @@ function CheckoutContent() {
                           setSubmissionDetails(null);
                         }}
                         disabled={isSubmitting}
-                        maxLength={30}
-                        placeholder="Example: 01XXXXXXXXX"
-                        autoComplete="tel"
+                        required
+                        maxLength={60}
+                        placeholder={paymentMethod === "bank" ? "Account used to send the transfer" : "Example: 01XXXXXXXXX"}
+                        autoComplete="off"
                         className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition placeholder:text-[var(--muted)] focus:border-[#b88b48] focus:ring-2 focus:ring-[#b88b48]/15 disabled:opacity-60"
                       />
                     </label>
                   </div>
 
-                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
+                  {!paymentConfiguration && <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
                     <div className="flex items-start gap-3">
                       <ShieldCheck
                         size={19}
@@ -829,7 +987,7 @@ function CheckoutContent() {
                         </p>
                       </div>
                     </div>
-                  </div>
+                  </div>}
                 </div>
               ) : (
                 /* Online gateway information */
@@ -846,14 +1004,14 @@ function CheckoutContent() {
                       </h3>
 
                       <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
-                        You will be redirected to the AamarPay sandbox
+                        You will be redirected to the AamarPay {gatewayMode}
                         payment page. The backend will verify the
                         transaction before activating your membership.
                       </p>
 
                       <span className="mt-3 inline-flex items-center gap-2 rounded-full border border-[#b88b48]/30 bg-[#b88b48]/10 px-3 py-1.5 text-xs font-medium text-[#b88b48]">
                         <LockKeyhole size={13} />
-                        Sandbox testing mode
+                        {gatewayMode === "sandbox" ? "Sandbox testing mode" : "Live payment mode"}
                       </span>
                     </div>
                   </div>
@@ -953,14 +1111,38 @@ function CheckoutContent() {
                 </div>
 
                 <p className="mt-4 text-xs leading-5 text-[var(--muted)]">
-                  Your membership is not active yet. It will be
-                  activated only after the administrator approves
-                  the submitted payment.
+                  This confirms submission only; it is not payment approval.
+                  Your membership remains inactive until the administrator
+                  verifies the payment.
                 </p>
+
+                {submissionReceiptError && (
+                  <p role="alert" className="mt-3 text-sm text-red-600">
+                    {submissionReceiptError}
+                  </p>
+                )}
+
+                {submissionDetails.paymentId && (
+                  <button
+                    type="button"
+                    disabled={submissionReceiptLoading}
+                    onClick={() => void handleDownloadSubmissionReceipt()}
+                    className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#b88b48] px-4 py-2.5 text-sm font-semibold text-[#1d160c] transition hover:bg-[#c99b59] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {submissionReceiptLoading ? (
+                      <LoaderCircle size={16} className="animate-spin" />
+                    ) : (
+                      <Download size={16} />
+                    )}
+                    {submissionReceiptLoading
+                      ? "Preparing receipt..."
+                      : "Download Submission Receipt"}
+                  </button>
+                )}
 
                 <Link
                   href="/dashboard"
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 px-4 py-2.5 text-sm font-medium transition hover:bg-emerald-500/10"
+                  className="mt-5 ml-0 inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 px-4 py-2.5 text-sm font-medium transition hover:bg-emerald-500/10 sm:ml-3"
                 >
                   Go to dashboard
                   <ArrowRight size={15} />
@@ -973,6 +1155,7 @@ function CheckoutContent() {
               type="submit"
               disabled={
                 isLoadingPlans ||
+                availablePaymentMethods.length === 0 ||
                 Boolean(plansError) ||
                 !plan ||
                 isSubmitting

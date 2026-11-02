@@ -2,7 +2,7 @@ import nodemailer from "nodemailer";
 
 import Certificate from "../models/Certificate";
 import Membership from "../models/Membership";
-import Notification, { type INotification } from "../models/Notification";
+import Notification from "../models/Notification";
 import User from "../models/User";
 
 export type ReminderKey = "7d" | "1d" | "0d";
@@ -235,18 +235,6 @@ export async function processCertificateExpiryReminders(): Promise<CertificateEx
       expiresAt,
     );
 
-    const existingNotification = await Notification.findOne({
-      user: user._id,
-      type: "certificate-expiry",
-      certificateId: String(certificate.certificateId),
-      reminderKey,
-    }).lean();
-
-    if (existingNotification) {
-      summary.skipped += 1;
-      continue;
-    }
-
     const notificationPayload = {
       user: user._id,
       type: "certificate-expiry" as const,
@@ -261,10 +249,25 @@ export async function processCertificateExpiryReminders(): Promise<CertificateEx
       daysRemaining:
         reminderKey === "7d" ? 7 : reminderKey === "1d" ? 1 : 0,
       isRead: false,
+      isHidden: !inAppEnabled,
       readAt: null,
     };
 
-    const createdNotification: INotification = await Notification.create(notificationPayload);
+    const createdNotification = await Notification.findOneAndUpdate(
+      {
+        user: user._id,
+        type: "certificate-expiry",
+        relatedType: "certificate",
+        relatedId: String(certificate.certificateId),
+        reminderKey,
+      },
+      { $setOnInsert: notificationPayload },
+      { upsert: true, new: false, setDefaultsOnInsert: true },
+    ).exec();
+    if (createdNotification) {
+      summary.skipped += 1;
+      continue;
+    }
     summary.created += 1;
 
     if (emailEnabled) {
@@ -282,11 +285,9 @@ export async function processCertificateExpiryReminders(): Promise<CertificateEx
       }
     }
 
-    if (createdNotification && createdNotification._id) {
-      console.info(
-        `Created certificate expiry notification for ${user.email} (${certificate.certificateId}) with reminder ${reminderKey}.`,
-      );
-    }
+    console.info(
+      `Created certificate expiry notification for ${user.email} (${certificate.certificateId}) with reminder ${reminderKey}.`,
+    );
   }
 
   return summary;
@@ -308,12 +309,180 @@ function isMembershipEligibleForReminder(membership: {
   return expiryDate.getTime() >= Date.now();
 }
 
+export async function processMembershipRenewalReminders(): Promise<CertificateExpiryProcessingSummary> {
+  const now = new Date();
+  const summary: CertificateExpiryProcessingSummary = {
+    created: 0,
+    skipped: 0,
+    emailSent: 0,
+    emailUnavailable: false,
+  };
+  const memberships = await Membership.find({
+    status: "active",
+    endDate: { $ne: null, $gte: now },
+  })
+    .populate({
+      path: "user",
+      select: "_id name email isActive notificationPreferences",
+    })
+    .lean()
+    .exec();
+
+  for (const membership of memberships) {
+    if (!membership.endDate) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    const user = membership.user as unknown as {
+      _id?: string;
+      email?: string;
+      isActive?: boolean;
+      notificationPreferences?: {
+        email?: boolean;
+        inApp?: boolean;
+        certificateExpiry?: boolean;
+      };
+    } | null;
+    if (!user?._id || !user.email || user.isActive === false) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    const preferences = user.notificationPreferences;
+    const emailEnabled = preferences?.email !== false;
+    const inAppEnabled = preferences?.inApp !== false;
+    if (!emailEnabled && !inAppEnabled) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    const successor = await Membership.findOne({
+      renewalOf: membership._id,
+      status: { $in: ["pending", "active"] },
+    })
+      .select("_id")
+      .lean()
+      .exec();
+    if (successor) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    const daysRemaining = Math.round(
+      (getDhakaCalendarDayValue(new Date(membership.endDate)) -
+        getDhakaCalendarDayValue(now)) /
+        DAY_MS,
+    );
+    if (![30, 7, 1].includes(daysRemaining)) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    const reminderKey = `${daysRemaining}d`;
+    const expiresAt = new Date(membership.endDate);
+    const formattedDate = new Intl.DateTimeFormat("en-BD", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      timeZone: "Asia/Dhaka",
+    }).format(expiresAt);
+    const title =
+      daysRemaining === 1
+        ? "Membership expires tomorrow"
+        : "Membership renewal reminder";
+    const message =
+      daysRemaining === 1
+        ? `Your Membrix membership expires tomorrow on ${formattedDate}. Renew to keep your membership active.`
+        : `Your Membrix membership expires in ${daysRemaining} days on ${formattedDate}. Renew to keep your membership active.`;
+    const payload = {
+      user: user._id,
+      type: "membership-renewal" as const,
+      title,
+      message,
+      reminderKey,
+      relatedType: "membership",
+      relatedId: membership.membershipId,
+      certificateId: null,
+      membershipId: membership.membershipId,
+      expiresAt,
+      daysRemaining,
+      isRead: false,
+      isHidden: !inAppEnabled,
+      readAt: null,
+    };
+
+    const notification = await Notification.findOneAndUpdate(
+      {
+        user: user._id,
+        type: "membership-renewal",
+        relatedType: "membership",
+        relatedId: membership.membershipId,
+        reminderKey,
+      },
+      { $setOnInsert: payload },
+      { upsert: true, new: false, setDefaultsOnInsert: true },
+    ).exec();
+
+    if (notification) {
+      summary.skipped += 1;
+      continue;
+    }
+    summary.created += 1;
+
+    if (emailEnabled) {
+      const transporter = createMailer();
+      if (!transporter) {
+        summary.emailUnavailable = true;
+      } else {
+        try {
+          await transporter.sendMail({
+            from: process.env.SMTP_FROM || "no-reply@membrix.com",
+            to: user.email,
+            subject: title,
+            text: message,
+            html: `<p>${message}</p>`,
+          });
+          summary.emailSent += 1;
+        } catch (error) {
+          console.error(`Membership renewal email failed for ${user.email}:`, error);
+          summary.emailUnavailable = true;
+        }
+      }
+    }
+  }
+
+  return summary;
+}
+
+async function expireEndedMemberships(): Promise<void> {
+  await Membership.updateMany(
+    { status: "active", endDate: { $ne: null, $lte: new Date() } },
+    { $set: { status: "expired" } },
+  ).exec();
+}
+
+let schedulerRunning = false;
+
 export function initializeCertificateExpiryScheduler(): void {
   const DAILY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-  void processCertificateExpiryReminders();
+  const run = async () => {
+    if (schedulerRunning) return;
+    schedulerRunning = true;
+    try {
+      await Promise.all([
+        processCertificateExpiryReminders(),
+        processMembershipRenewalReminders(),
+      ]);
+      await expireEndedMemberships();
+    } catch (error) {
+      console.error("Membership expiry scheduler failed:", error);
+    } finally {
+      schedulerRunning = false;
+    }
+  };
 
-  setInterval(() => {
-    void processCertificateExpiryReminders();
-  }, DAILY_INTERVAL_MS);
+  void run();
+  setInterval(() => void run(), DAILY_INTERVAL_MS);
 }

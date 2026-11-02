@@ -7,9 +7,195 @@ import MembershipPlan from "../models/MembershipPlan";
 import Membership from "../models/Membership";
 import Payment from "../models/Payment";
 import User from "../models/User";
+import PaymentSettings from "../models/PaymentSettings";
+import Certificate from "../models/Certificate";
+import Notification from "../models/Notification";
+import { buildPaymentReceiptPdf } from "../services/paymentReceipt";
+import {
+  getActivationIntegrityIssue,
+  isFinalReceiptEligible,
+  isManualSubmissionReceiptEligible,
+} from "../services/paymentIntegrity";
 import { authenticate } from "../middleware/authenticate";
+import type { PaymentReceiptKind } from "../services/paymentReceipt";
+import {
+  encryptAamarPayConfiguration,
+  getAamarPayConfiguration,
+  getAamarPayConfigurationForPayment,
+} from "../services/aamarPay";
 
 const router = Router();
+
+async function sendPaymentReceipt(
+  req: Request,
+  res: Response,
+  kind: PaymentReceiptKind,
+): Promise<void> {
+  const paymentId = req.params.paymentId;
+  if (typeof paymentId !== "string" || !Types.ObjectId.isValid(paymentId)) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid payment ID.",
+    });
+    return;
+  }
+  if (!req.userId) {
+    res.status(401).json({
+      success: false,
+      message: "Authentication required.",
+    });
+    return;
+  }
+
+  try {
+    const payment = await Payment.findOne({
+      _id: paymentId,
+      user: req.userId,
+    }).exec();
+    if (!payment) {
+      res.status(404).json({
+        success: false,
+        message: "Payment not found.",
+      });
+      return;
+    }
+
+    const eligible =
+      kind === "submission"
+        ? isManualSubmissionReceiptEligible(payment.status, payment.method)
+        : isFinalReceiptEligible(payment.status, payment.method);
+    if (!eligible) {
+      res.status(409).json({
+        success: false,
+        message:
+          kind === "submission"
+            ? "A submission receipt is available only for pending manual payments."
+            : "A final receipt is available only for completed payments.",
+      });
+      return;
+    }
+
+    const [membership, user, plan] = await Promise.all([
+      Membership.findById(payment.membership).exec(),
+      User.findById(payment.user)
+        .select("name email phone organization")
+        .exec(),
+      MembershipPlan.findById(payment.plan).exec(),
+    ]);
+
+    if (!membership || !user || !plan) {
+      res.status(409).json({
+        success: false,
+        message: "Payment records are incomplete; a receipt cannot be issued.",
+      });
+      return;
+    }
+    if (kind === "submission" && membership.status !== "pending") {
+      res.status(409).json({
+        success: false,
+        message:
+          "A submission receipt is available only while its membership is pending.",
+      });
+      return;
+    }
+
+    const integrityIssue = getActivationIntegrityIssue(
+      payment,
+      membership,
+      plan,
+    );
+    if (integrityIssue) {
+      console.error("Payment receipt integrity check failed.", {
+        paymentId: String(payment._id),
+        membershipId: String(membership._id),
+        check: integrityIssue,
+      });
+      res.status(409).json({
+        success: false,
+        message: "Payment records do not match; a receipt cannot be issued.",
+      });
+      return;
+    }
+
+    const completedAt =
+      kind === "final"
+        ? payment.completedAt ?? payment.reviewedAt ?? payment.updatedAt
+        : null;
+    const receiptNumber = `${
+      kind === "submission" ? "MBX-SUB" : "MBX-RCPT"
+    }-${String(payment._id).toUpperCase()}`;
+    const providerNames: Record<string, string> = {
+      bkash: "bKash",
+      nagad: "Nagad",
+      bank: "Bank Transfer",
+      online: payment.gatewayName || "AamarPay",
+    };
+    const methodNames: Record<string, string> = {
+      bkash: "bKash",
+      nagad: "Nagad",
+      bank: "Bank Transfer",
+      online: "Online payment",
+    };
+    const pdf = await buildPaymentReceiptPdf({
+      kind,
+      receiptNumber,
+      issuedAt: new Date(),
+      memberName: user.name,
+      memberEmail: user.email,
+      memberPhone: user.phone,
+      organizationName: user.organization ?? "",
+      membershipId: membership.membershipId,
+      planName: plan.name,
+      amount: payment.amount,
+      currency: payment.currency,
+      method: methodNames[payment.method],
+      serviceProvider: providerNames[payment.method],
+      transactionId: payment.transactionId ?? payment.paymentReference,
+      gatewayTransactionId: payment.gatewayTransactionId,
+      submittedAt: payment.createdAt,
+      completedAt,
+    });
+
+    res
+      .status(200)
+      .set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${receiptNumber}.pdf"`,
+        "Cache-Control": "private, no-store",
+        "Content-Length": String(pdf.length),
+      })
+      .send(pdf);
+  } catch (error) {
+    console.error("Payment receipt generation failed.", {
+      paymentId,
+      kind,
+      error,
+    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: "Unable to generate the payment receipt.",
+      });
+    }
+  }
+}
+
+router.get(
+  "/:paymentId/submission-receipt",
+  authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    await sendPaymentReceipt(req, res, "submission");
+  },
+);
+
+router.get(
+  "/:paymentId/receipt",
+  authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    await sendPaymentReceipt(req, res, "final");
+  },
+);
+
 // GET /api/payments/me
 // Return only the authenticated user's payment history.
 router.get(
@@ -32,6 +218,7 @@ router.get(
       })
         .populate("plan", "name slug")
         .populate("membership", "membershipId")
+        .populate("reviewedBy", "name")
         .sort({ createdAt: -1 })
         .lean()
         .exec();
@@ -47,6 +234,9 @@ router.get(
           const membership = payment.membership as unknown as {
             membershipId: string;
           } | null;
+          const reviewer = payment.reviewedBy as unknown as {
+            name: string;
+          } | null;
 
           return {
             id: String(payment._id),
@@ -58,6 +248,9 @@ router.get(
             gatewayTransactionId: payment.gatewayTransactionId,
             membershipId: membership?.membershipId ?? null,
             planName: plan?.name ?? "Membership",
+            reviewedAt: payment.reviewedAt,
+            reviewedBy: reviewer?.name ?? null,
+            adminNote: payment.adminNote,
             createdAt: payment.createdAt,
           };
         }),
@@ -72,9 +265,7 @@ router.get(
     }
   },
 );
-const PLAN_SLUGS = ["essential", "premium", "lifetime"] as const;
-
-type PlanSlug = (typeof PLAN_SLUGS)[number];
+type PlanSlug = string;
 type ManualPaymentMethod = "bkash" | "nagad" | "bank";
 type CallbackStatus = "success" | "failed" | "cancelled";
 
@@ -84,6 +275,7 @@ type CheckoutPlan = {
   slug: PlanSlug;
   price: number;
   isActive: boolean;
+  billingType?: "yearly" | "one_time";
 };
 
 type AamarPayInitiateResponse = {
@@ -106,7 +298,8 @@ type AamarPayVerificationResponse = {
 function isPlanSlug(value: unknown): value is PlanSlug {
   return (
     typeof value === "string" &&
-    PLAN_SLUGS.includes(value as PlanSlug)
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) &&
+    value.length <= 100
   );
 }
 
@@ -201,12 +394,14 @@ router.post(
 
       const body = (req.body ?? {}) as {
         planSlug?: unknown;
+        amount?: unknown;
         method?: unknown;
         transactionId?: unknown;
         payerNumber?: unknown;
+        renewalMembershipId?: unknown;
       };
 
-      const { planSlug, method, transactionId, payerNumber } = body;
+      const { planSlug, amount, method, transactionId, payerNumber, renewalMembershipId } = body;
 
       if (!isPlanSlug(planSlug)) {
         res.status(400).json({
@@ -231,7 +426,8 @@ router.post(
       if (
         typeof transactionId !== "string" ||
         transactionId.trim().length < 3 ||
-        transactionId.trim().length > 120
+        transactionId.trim().length > 120 ||
+        /[\u0000-\u001f\u007f]/.test(transactionId)
       ) {
         res.status(400).json({
           success: false,
@@ -258,24 +454,55 @@ router.post(
           ? payerNumber.trim()
           : "";
 
-      if (payer.length > 30) {
+      if (
+        payer.length > 60 ||
+        payer.length < 3 ||
+        /[\u0000-\u001f\u007f]/.test(payer) ||
+        ((method === "bkash" || method === "nagad") &&
+          !/^\+?[0-9][0-9\s()-]{2,29}$/.test(payer))
+      ) {
         res.status(400).json({
           success: false,
-          message: "Payer number must not exceed 30 characters.",
+          message: "Enter a valid sender number or account (3–60 characters).",
         });
         return;
       }
 
-      const [user, planResult] = await Promise.all([
+      const settings = await PaymentSettings.findOne({ key: "default" }).lean().exec();
+      const enabledMethod = settings?.enabled?.[method as ManualPaymentMethod] ?? false;
+      const recipientConfigured =
+        method === "bkash"
+          ? Boolean(settings?.bkashNumber)
+          : method === "nagad"
+            ? Boolean(settings?.nagadNumber)
+            : Boolean(settings?.bankAccountName && settings?.bankName && settings?.bankAccountNumber);
+      if (!enabledMethod || !recipientConfigured) {
+        res.status(400).json({
+          success: false,
+          message: "This payment method is not currently available.",
+        });
+        return;
+      }
+
+      const [user, planResult, renewalSource] = await Promise.all([
         User.findById(userId).select("_id isActive"),
 
         MembershipPlan.findOne({
           slug: planSlug,
           isActive: true,
         })
-          .select("_id name slug price isActive")
+          .select("_id name slug price isActive billingType")
           .lean()
           .exec(),
+        typeof renewalMembershipId === "string"
+          ? Membership.findOne({
+              membershipId: renewalMembershipId.trim(),
+              user: userId,
+              status: { $in: ["active", "expired"] },
+            })
+              .populate({ path: "plan", select: "_id name slug price isActive billingType" })
+              .exec()
+          : Promise.resolve(null),
       ]);
 
       if (!user || !user.isActive) {
@@ -286,7 +513,37 @@ router.post(
         return;
       }
 
-      const plan = planResult as unknown as CheckoutPlan | null;
+      const plan = renewalSource
+        ? (renewalSource.plan as unknown as CheckoutPlan)
+        : (planResult as unknown as CheckoutPlan | null);
+
+      if (renewalMembershipId !== undefined && !renewalSource) {
+        res.status(404).json({
+          success: false,
+          message: "The membership selected for renewal was not found or is not eligible.",
+        });
+        return;
+      }
+      if (renewalSource && plan?.billingType === "one_time") {
+        res.status(400).json({
+          success: false,
+          message: "Lifetime memberships do not require renewal.",
+        });
+        return;
+      }
+      if (renewalSource) {
+        const existingRenewal = await Membership.findOne({
+          renewalOf: renewalSource._id,
+          status: { $in: ["pending", "active", "expired"] },
+        }).select("_id").lean().exec();
+        if (existingRenewal) {
+          res.status(409).json({
+            success: false,
+            message: "This membership already has a pending or approved renewal.",
+          });
+          return;
+        }
+      }
 
       if (!plan) {
         res.status(404).json({
@@ -310,11 +567,22 @@ router.post(
         return;
       }
 
+      if (
+        typeof amount !== "number" ||
+        !Number.isFinite(amount) ||
+        toMinorUnits(amount) !== toMinorUnits(plan.price)
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "The submitted payment amount does not match the selected plan.",
+        });
+        return;
+      }
+
       const manualMethod = method as ManualPaymentMethod;
 
       // Reject an already submitted transaction reference.
       const duplicate = await Payment.findOne({
-        method: manualMethod,
         transactionId: {
           $regex: new RegExp(
             `^${escapeRegExp(reference)}$`,
@@ -347,6 +615,7 @@ router.post(
         status: "pending",
         startDate: null,
         endDate: null,
+        renewalOf: renewalSource?._id ?? null,
       });
 
       createdMembershipId = membership._id;
@@ -360,6 +629,10 @@ router.post(
         method: manualMethod,
         status: "pending",
         transactionId: reference,
+        referenceHash: crypto
+          .createHash("sha256")
+          .update(reference.toLowerCase())
+          .digest("hex"),
         payerNumber: payer || null,
         paymentReference: null,
         proofUrl: null,
@@ -398,6 +671,19 @@ router.post(
         });
       }
 
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === 11000
+      ) {
+        res.status(409).json({
+          success: false,
+          message: "This transaction reference or renewal request has already been submitted.",
+        });
+        return;
+      }
+
       console.error("Manual payment submission error:", error);
 
       res.status(500).json({
@@ -409,7 +695,7 @@ router.post(
 );
 
 /**
- * Initiate an AamarPay sandbox payment session.
+ * Initiate an AamarPay payment session.
  * Membership activation is only allowed after server verification.
  */
 router.post(
@@ -430,11 +716,14 @@ router.post(
         return;
       }
 
-      const planSlug: unknown = (
-        req.body as { planSlug?: unknown } | undefined
-      )?.planSlug;
+      const requestBody = (req.body ?? {}) as {
+        planSlug?: unknown;
+        renewalMembershipId?: unknown;
+      };
+      const planSlug: unknown = requestBody.planSlug;
+      const renewalMembershipId = requestBody.renewalMembershipId;
 
-      if (!isPlanSlug(planSlug)) {
+      if (!isPlanSlug(planSlug) && typeof renewalMembershipId !== "string") {
         res.status(400).json({
           success: false,
           message: "Please select a valid membership plan.",
@@ -442,34 +731,18 @@ router.post(
         return;
       }
 
-      const storeId = process.env.AAMARPAY_STORE_ID;
-      const signatureKey = process.env.AAMARPAY_SIGNATURE_KEY;
-      const baseUrl = process.env.AAMARPAY_BASE_URL;
+      const gateway = await getAamarPayConfiguration();
       const frontendUrl = process.env.FRONTEND_URL;
       const backendUrl = process.env.BACKEND_URL;
 
       if (
-        !storeId ||
-        !signatureKey ||
-        !baseUrl ||
+        !gateway ||
         !frontendUrl ||
         !backendUrl
       ) {
         res.status(503).json({
           success: false,
           message: "Payment gateway configuration is incomplete.",
-        });
-        return;
-      }
-
-      if (
-        process.env.AAMARPAY_MODE !== "sandbox" ||
-        baseUrl !== "https://sandbox.aamarpay.com"
-      ) {
-        res.status(503).json({
-          success: false,
-          message:
-            "Only the configured Sandbox environment is supported.",
         });
         return;
       }
@@ -486,15 +759,53 @@ router.post(
         return;
       }
 
-      const planResult = await MembershipPlan.findOne({
-        slug: planSlug,
-        isActive: true,
-      })
-        .select("_id name slug price isActive")
-        .lean()
-        .exec();
+      const renewalSource =
+        typeof renewalMembershipId === "string"
+          ? await Membership.findOne({
+              membershipId: renewalMembershipId.trim(),
+              user: userId,
+              status: { $in: ["active", "expired"] },
+            }).populate({ path: "plan", select: "_id name slug price isActive billingType" })
+          : null;
 
-      const plan = planResult as unknown as CheckoutPlan | null;
+      if (typeof renewalMembershipId === "string" && !renewalSource) {
+        res.status(404).json({
+          success: false,
+          message: "The membership selected for renewal was not found or is not eligible.",
+        });
+        return;
+      }
+
+      const plan = renewalSource
+        ? (renewalSource.plan as unknown as CheckoutPlan)
+        : ((await MembershipPlan.findOne({
+            slug: planSlug,
+            isActive: true,
+          })
+            .select("_id name slug price isActive billingType")
+            .lean()
+            .exec()) as unknown as CheckoutPlan | null);
+
+      if (renewalSource && plan?.billingType === "one_time") {
+        res.status(400).json({
+          success: false,
+          message: "Lifetime memberships do not require renewal.",
+        });
+        return;
+      }
+      if (renewalSource) {
+        const existingRenewal = await Membership.findOne({
+          renewalOf: renewalSource._id,
+          status: { $in: ["pending", "active", "expired"] },
+        }).select("_id").lean().exec();
+        if (existingRenewal) {
+          res.status(409).json({
+            success: false,
+            message: "This membership already has a pending or approved renewal.",
+          });
+          return;
+        }
+      }
 
       if (!plan) {
         res.status(404).json({
@@ -520,7 +831,7 @@ router.post(
       }
 
       const user = await User.findById(userId).select(
-        "name email isActive",
+        "name email phone isActive",
       );
 
       if (!user || !user.isActive) {
@@ -549,6 +860,7 @@ router.post(
         status: "pending",
         startDate: null,
         endDate: null,
+        renewalOf: renewalSource?._id ?? null,
       });
 
       await Payment.create({
@@ -562,14 +874,15 @@ router.post(
         transactionId,
         payerNumber: null,
         gatewayTransactionId: null,
-        gatewayName: "aamarPay",
+        gatewayName: `aamarPay-${gateway.mode}`,
+        gatewayConfigEncrypted: encryptAamarPayConfiguration(gateway),
       });
 
       const normalizedBackendUrl = backendUrl.replace(/\/+$/, "");
 
       const payload = {
-        store_id: storeId,
-        signature_key: signatureKey,
+        store_id: gateway.storeId,
+        signature_key: gateway.signatureKey,
         tran_id: transactionId,
         amount: String(plan.price),
         currency: "BDT",
@@ -580,8 +893,7 @@ router.post(
         cus_city: "Dhaka",
         cus_country: "Bangladesh",
 
-        // Sandbox placeholder only. Never use for live payments.
-        cus_phone: "01700000000",
+        cus_phone: user.phone,
 
         success_url:
           `${normalizedBackendUrl}/api/payments/aamarpay/callback?returnStatus=success`,
@@ -592,7 +904,7 @@ router.post(
         type: "json",
       };
 
-      const response = await fetch(`${baseUrl}/jsonpost.php`, {
+      const response = await fetch(`${gateway.baseUrl}/jsonpost.php`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -640,7 +952,10 @@ router.post(
 
       if (
         paymentUrl.protocol !== "https:" ||
-        paymentUrl.hostname !== "sandbox.aamarpay.com"
+        paymentUrl.hostname !==
+          (gateway.mode === "live"
+            ? "secure.aamarpay.com"
+            : "sandbox.aamarpay.com")
       ) {
         throw new Error(
           "AamarPay returned an unexpected payment URL.",
@@ -711,10 +1026,15 @@ router.post(
       process.env.FRONTEND_URL || "http://localhost:3000"
     ).replace(/\/+$/, "");
 
-    const redirectResult = (status: CallbackStatus): void => {
+    const redirectResult = (
+      status: CallbackStatus,
+      paymentId?: string,
+    ): void => {
+      const query = new URLSearchParams({ status });
+      if (paymentId) query.set("paymentId", paymentId);
       res.redirect(
         303,
-        `${frontendBaseUrl}/checkout/result?status=${status}`,
+        `${frontendBaseUrl}/checkout/result?${query.toString()}`,
       );
     };
 
@@ -731,27 +1051,27 @@ router.post(
         return;
       }
 
-      const storeId = process.env.AAMARPAY_STORE_ID;
-      const signatureKey = process.env.AAMARPAY_SIGNATURE_KEY;
-      const baseUrl = process.env.AAMARPAY_BASE_URL;
+      const payment = await Payment.findOne({
+        transactionId,
+        method: "online",
+      })
+        .select("+gatewayConfigEncrypted")
+        .exec();
 
-      if (
-        !storeId ||
-        !signatureKey ||
-        baseUrl !== "https://sandbox.aamarpay.com" ||
-        process.env.AAMARPAY_MODE !== "sandbox"
-      ) {
+      if (!payment) {
         redirectResult("failed");
         return;
       }
 
-      const payment = await Payment.findOne({
-        transactionId,
-        method: "online",
-        gatewayName: "aamarPay",
-      });
-
-      if (!payment) {
+      const gateway = await getAamarPayConfigurationForPayment(
+        payment.gatewayConfigEncrypted,
+      );
+      if (
+        !gateway ||
+        (payment.gatewayName &&
+          payment.gatewayName !== `aamarPay-${gateway.mode}` &&
+          !(gateway.mode === "sandbox" && payment.gatewayName === "aamarPay"))
+      ) {
         redirectResult("failed");
         return;
       }
@@ -759,13 +1079,13 @@ router.post(
       // Verify the transaction directly with AamarPay.
       const verificationUrl = new URL(
         "/api/v1/trxcheck/request.php",
-        baseUrl,
+        gateway.baseUrl,
       );
 
       verificationUrl.search = new URLSearchParams({
         request_id: transactionId,
-        store_id: storeId,
-        signature_key: signatureKey,
+        store_id: gateway.storeId,
+        signature_key: gateway.signatureKey,
         type: "json",
       }).toString();
 
@@ -805,7 +1125,7 @@ router.post(
       // Merchant and transaction identity must match.
       if (
         verified.mer_txnid !== transactionId ||
-        verified.store_id !== storeId
+        verified.store_id !== gateway.storeId
       ) {
         throw new Error(
           "The verified merchant transaction details do not match.",
@@ -871,6 +1191,33 @@ router.post(
               await currentMembership.save({
                 session: failureSession,
               });
+              await Notification.updateOne(
+                {
+                  user: currentPayment.user,
+                  type: "payment-update",
+                  relatedType: "payment",
+                  relatedId: String(currentPayment._id),
+                  reminderKey: "failed",
+                },
+                {
+                  $setOnInsert: {
+                    user: currentPayment.user,
+                    type: "payment-update",
+                    title: "Payment failed",
+                    message: "The online payment could not be completed. You can try again from your membership dashboard.",
+                    reminderKey: "failed",
+                    relatedType: "payment",
+                    relatedId: String(currentPayment._id),
+                    certificateId: null,
+                    membershipId: currentMembership.membershipId,
+                    expiresAt: null,
+                    daysRemaining: null,
+                    isRead: false,
+                    readAt: null,
+                  },
+                },
+                { upsert: true, session: failureSession },
+              ).exec();
             });
           } finally {
             await failureSession.endSession();
@@ -924,19 +1271,8 @@ router.post(
 
       // Idempotent handling for an already completed payment.
       if (payment.status === "completed") {
-        const activeMembership = await Membership.findOne({
-          _id: payment.membership,
-          status: "active",
-        });
-
-        if (activeMembership) {
-          redirectResult("success");
-          return;
-        }
-
-        throw new Error(
-          "Payment is completed but membership is not active. Manual review required.",
-        );
+        redirectResult("success", String(payment._id));
+        return;
       }
 
       if (
@@ -949,11 +1285,12 @@ router.post(
       const planResult = await MembershipPlan.findById(
         payment.plan,
       )
-        .select("_id billingType durationDays")
+        .select("_id name billingType durationDays")
         .lean()
         .exec();
 
       const plan = planResult as unknown as {
+        name: string;
         billingType: "yearly" | "one_time";
         durationDays?: number | null;
       } | null;
@@ -966,26 +1303,6 @@ router.post(
           "The membership plan billing settings are invalid.",
         );
       }
-
-      const startDate = new Date();
-
-      const configuredDuration = Number(
-        plan.durationDays ?? 365,
-      );
-
-      const durationDays =
-        Number.isFinite(configuredDuration) &&
-        configuredDuration > 0
-          ? configuredDuration
-          : 365;
-
-      const endDate =
-        plan.billingType === "one_time"
-          ? null
-          : new Date(
-              startDate.getTime() +
-                durationDays * 24 * 60 * 60 * 1000,
-            );
 
       // Atomically complete payment and activate membership.
       const session = await mongoose.startSession();
@@ -1025,7 +1342,68 @@ router.post(
             );
           }
 
+          const currentPlan = await MembershipPlan.findById(
+            currentMembership.plan,
+          )
+            .select("_id name price billingType durationDays")
+            .session(session)
+            .exec();
+          const integrityIssue = getActivationIntegrityIssue(
+            currentPayment,
+            currentMembership,
+            currentPlan,
+          );
+          if (integrityIssue) {
+            console.error("AamarPay activation integrity check failed.", {
+              paymentId: String(currentPayment._id),
+              membershipId: String(currentMembership._id),
+              check: integrityIssue,
+            });
+            throw new Error("Payment records failed an integrity check.");
+          }
+          if (
+            !currentPlan ||
+            !["yearly", "one_time"].includes(currentPlan.billingType)
+          ) {
+            throw new Error("The membership plan billing settings are invalid.");
+          }
+          const activationUser = await User.findById(currentMembership.user)
+            .select("_id name organization")
+            .session(session)
+            .exec();
+          if (!activationUser) {
+            console.error("AamarPay activation member record is missing.", {
+              paymentId: String(currentPayment._id),
+              membershipId: String(currentMembership._id),
+            });
+            throw new Error("The associated member record is unavailable.");
+          }
+
+          let startDate = new Date();
+          if (currentMembership.renewalOf) {
+            const previousMembership = await Membership.findById(
+              currentMembership.renewalOf,
+            )
+              .select("endDate")
+              .session(session)
+              .exec();
+            if (previousMembership?.endDate && previousMembership.endDate > startDate) {
+              startDate = previousMembership.endDate;
+            }
+          }
+
+          const configuredDuration = Number(currentPlan.durationDays ?? 365);
+          const durationDays =
+            Number.isFinite(configuredDuration) && configuredDuration > 0
+              ? configuredDuration
+              : 365;
+          const endDate =
+            currentPlan.billingType === "one_time"
+              ? null
+              : new Date(startDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+
           currentPayment.status = "completed";
+          currentPayment.completedAt = new Date();
 
           currentPayment.gatewayTransactionId =
             typeof verified.pg_txnid === "string"
@@ -1038,12 +1416,61 @@ router.post(
 
           await currentPayment.save({ session });
           await currentMembership.save({ session });
+          await Notification.updateOne(
+            {
+              user: currentPayment.user,
+              type: "payment-update",
+              relatedType: "payment",
+              relatedId: String(currentPayment._id),
+              reminderKey: "completed",
+            },
+            {
+              $setOnInsert: {
+                user: currentPayment.user,
+                type: "payment-update",
+                title: "Payment approved",
+                message: "Your online payment was verified and your membership is active.",
+                reminderKey: "completed",
+                relatedType: "payment",
+                relatedId: String(currentPayment._id),
+                certificateId: null,
+                membershipId: currentMembership.membershipId,
+                expiresAt: null,
+                daysRemaining: null,
+                isRead: false,
+                readAt: null,
+              },
+            },
+            { upsert: true, session },
+          ).exec();
+          const existingCertificate = await Certificate.findOne({
+            membership: currentMembership._id,
+          }).session(session);
+          if (!existingCertificate) {
+            await Certificate.create(
+              [
+                {
+                  certificateId: `MBX-${crypto.randomBytes(6).toString("hex").toUpperCase()}`,
+                  verificationToken: crypto.randomBytes(32).toString("hex"),
+                  user: currentMembership.user,
+                  membership: currentMembership._id,
+                  membershipIdSnapshot: currentMembership.membershipId,
+                  memberName: activationUser.name,
+                  organizationName: activationUser.organization ?? "",
+                  planName: currentPlan.name,
+                  expiresAt: endDate,
+                  status: "issued",
+                },
+              ],
+              { session },
+            );
+          }
         });
       } finally {
         await session.endSession();
       }
 
-      redirectResult("success");
+      redirectResult("success", String(payment._id));
     } catch (error) {
       console.error(
         "AamarPay callback verification error:",

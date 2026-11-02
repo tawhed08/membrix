@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import crypto from "node:crypto";
 import mongoose, { Types } from "mongoose";
 
 import {
@@ -13,6 +14,9 @@ import Payment, {
   type PaymentMethod,
   type PaymentStatus,
 } from "../models/Payment";
+import Certificate from "../models/Certificate";
+import Notification from "../models/Notification";
+import { getActivationIntegrityIssue } from "../services/paymentIntegrity";
 
 const router = Router();
 
@@ -742,6 +746,8 @@ router.patch(
 
       let finalMembershipStatus: string =
         action === "approve" ? "active" : "cancelled";
+      let certificateMemberName = "";
+      let certificateOrganization = "";
 
       await session.withTransaction(async () => {
         const payment = await Payment.findById(paymentId)
@@ -805,9 +811,10 @@ router.patch(
           );
         }
 
+        let certificatePlanName = "Membership";
         if (action === "approve") {
           const plan = await MembershipPlan.findById(payment.plan)
-            .select("billingType durationDays")
+            .select("_id name price billingType durationDays")
             .session(session)
             .exec();
 
@@ -820,6 +827,39 @@ router.patch(
               "The membership plan billing configuration is invalid.",
             );
           }
+          const integrityIssue = getActivationIntegrityIssue(
+            payment,
+            membership,
+            plan,
+          );
+          if (integrityIssue) {
+            console.error("Manual payment activation integrity check failed.", {
+              paymentId: String(payment._id),
+              membershipId: String(membership._id),
+              check: integrityIssue,
+            });
+            throw new AdminActionError(
+              409,
+              "Payment records failed an integrity check; membership was not activated.",
+            );
+          }
+          const approvalMember = await User.findById(membership.user)
+            .select("_id name organization")
+            .session(session)
+            .exec();
+          if (!approvalMember) {
+            console.error("Manual payment activation member record is missing.", {
+              paymentId: String(payment._id),
+              membershipId: String(membership._id),
+            });
+            throw new AdminActionError(
+              409,
+              "The associated member record is unavailable; membership was not activated.",
+            );
+          }
+          certificateMemberName = approvalMember.name;
+          certificateOrganization = approvalMember.organization ?? "";
+          certificatePlanName = plan.name;
 
           const durationDays =
             plan.durationDays == null
@@ -836,7 +876,18 @@ router.patch(
             );
           }
 
-          const startDate = new Date();
+          let startDate = new Date();
+          if (membership.renewalOf) {
+            const previousMembership = await Membership.findById(
+              membership.renewalOf,
+            )
+              .select("endDate")
+              .session(session)
+              .exec();
+            if (previousMembership?.endDate && previousMembership.endDate > startDate) {
+              startDate = previousMembership.endDate;
+            }
+          }
 
           membership.status = "active";
           membership.startDate = startDate;
@@ -849,6 +900,7 @@ router.patch(
                 );
 
           payment.status = "completed";
+          payment.completedAt = new Date();
 
           finalPaymentStatus = "completed";
           finalMembershipStatus = "active";
@@ -866,6 +918,60 @@ router.patch(
 
         await payment.save({ session });
         await membership.save({ session });
+        await Notification.updateOne(
+          {
+            user: payment.user,
+            type: "payment-update",
+            relatedType: "payment",
+            relatedId: String(payment._id),
+            reminderKey: "reviewed",
+          },
+          {
+            $setOnInsert: {
+              user: payment.user,
+              type: "payment-update",
+              title: action === "approve" ? "Payment approved" : "Payment rejected",
+              message:
+                action === "approve"
+                  ? "Your payment was approved and your membership is active."
+                  : `Your payment was rejected.${adminNote ? ` Admin note: ${adminNote}` : ""}`,
+              reminderKey: "reviewed",
+              relatedType: "payment",
+              relatedId: String(payment._id),
+              certificateId: null,
+              membershipId: membership.membershipId,
+              expiresAt: null,
+              daysRemaining: null,
+              isRead: false,
+              readAt: null,
+            },
+          },
+          { upsert: true, session },
+        ).exec();
+        if (action === "approve") {
+          const existingCertificate = await Certificate.findOne({
+            membership: membership._id,
+          }).session(session);
+          if (!existingCertificate) {
+            await Certificate.create(
+              [
+                {
+                  certificateId: `MBX-${crypto.randomBytes(6).toString("hex").toUpperCase()}`,
+                  verificationToken: crypto.randomBytes(32).toString("hex"),
+                  user: membership.user,
+                  membership: membership._id,
+                  membershipIdSnapshot: membership.membershipId,
+                  memberName: certificateMemberName,
+                  organizationName: certificateOrganization,
+                  planName: certificatePlanName,
+                  expiresAt: membership.endDate,
+                  status: "issued",
+                },
+              ],
+              { session },
+            );
+          }
+        }
       });
 
       res.status(200).json({

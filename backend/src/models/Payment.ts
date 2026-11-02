@@ -25,13 +25,16 @@ export interface IPayment extends Document {
   method: PaymentMethod;
   status: PaymentStatus;
   transactionId: string | null;
+  referenceHash?: string;
   payerNumber: string | null;
   paymentReference: string | null;
   proofUrl: string | null;
   gatewayTransactionId: string | null;
   gatewayName: string | null;
+  gatewayConfigEncrypted?: string;
   reviewedBy: Types.ObjectId | null;
   reviewedAt: Date | null;
+  completedAt: Date | null;
   adminNote: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -98,12 +101,17 @@ const paymentSchema = new Schema<IPayment>(
       trim: true,
       maxlength: 120,
     },
+    referenceHash: {
+      type: String,
+      default: undefined,
+      select: false,
+    },
 
     payerNumber: {
       type: String,
       default: null,
       trim: true,
-      maxlength: 30,
+      maxlength: 60,
     },
 
     paymentReference: {
@@ -129,6 +137,11 @@ const paymentSchema = new Schema<IPayment>(
       default: null,
       trim: true,
     },
+    gatewayConfigEncrypted: {
+      type: String,
+      default: undefined,
+      select: false,
+    },
 
     reviewedBy: {
       type: Schema.Types.ObjectId,
@@ -137,6 +150,10 @@ const paymentSchema = new Schema<IPayment>(
     },
 
     reviewedAt: {
+      type: Date,
+      default: null,
+    },
+    completedAt: {
       type: Date,
       default: null,
     },
@@ -155,6 +172,10 @@ const paymentSchema = new Schema<IPayment>(
 
 paymentSchema.index({ user: 1, createdAt: -1 });
 paymentSchema.index({ membership: 1, status: 1 });
+paymentSchema.index(
+  { referenceHash: 1 },
+  { unique: true, sparse: true, name: "unique_manual_payment_reference" },
+);
 
 const Payment: Model<IPayment> =
   (mongoose.models.Payment as Model<IPayment>) ||

@@ -5,7 +5,7 @@ import mongoose, {
   Types,
 } from "mongoose";
 
-export type NotificationType = "certificate-expiry";
+export type NotificationType = "certificate-expiry" | "membership-renewal" | "payment-update";
 
 export interface INotification extends Document {
   user: Types.ObjectId;
@@ -20,6 +20,7 @@ export interface INotification extends Document {
   expiresAt: Date | null;
   daysRemaining: number | null;
   isRead: boolean;
+  isHidden: boolean;
   readAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -35,7 +36,7 @@ const notificationSchema = new Schema<INotification>(
     },
     type: {
       type: String,
-      enum: ["certificate-expiry"],
+      enum: ["certificate-expiry", "membership-renewal", "payment-update"],
       default: "certificate-expiry",
       required: true,
       index: true,
@@ -86,6 +87,10 @@ const notificationSchema = new Schema<INotification>(
       default: null,
     },
     isRead: {
+      type: Boolean,
+      default: false,
+    },
+    isHidden: {
       type: Boolean,
       default: false,
     },

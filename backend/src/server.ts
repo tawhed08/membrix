@@ -12,6 +12,7 @@ import adminRoutes from "./routes/admin";
 import notificationRoutes from "./routes/notifications";
 import publicPlanRoutes from "./routes/publicPlans";
 import contactRoutes from "./routes/contact";
+import paymentSettingsRoutes from "./routes/paymentSettings";
 import { initializeCertificateExpiryScheduler } from "./services/certificateExpiry";
 
 dotenv.config();
@@ -55,6 +56,7 @@ app.use("/api/plans", publicPlanRoutes);
 
 // Application routes
 app.use("/api/payments", paymentRoutes);
+app.use("/api/payment-settings", paymentSettingsRoutes);
 app.use("/api/memberships", membershipRoutes);
 app.use("/api/certificates", certificateRoutes);
 app.use("/api/notifications", notificationRoutes);

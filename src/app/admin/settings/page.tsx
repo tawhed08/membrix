@@ -49,6 +49,37 @@ type SettingsState = {
   primaryHighlight: string;
 };
 
+type PaymentSettingsState = {
+  bkashNumber: string;
+  nagadNumber: string;
+  bankAccountName: string;
+  bankName: string;
+  bankAccountNumber: string;
+  bankBranch: string;
+  bankAccountType: string;
+  paymentInstructions: string;
+  enabled: { bkash: boolean; nagad: boolean; bank: boolean };
+};
+
+type GatewaySettingsState = {
+  enabled: boolean;
+  mode: "sandbox" | "live";
+  storeId: string;
+  signatureKey: string;
+};
+
+const EMPTY_PAYMENT_SETTINGS: PaymentSettingsState = {
+  bkashNumber: "",
+  nagadNumber: "",
+  bankAccountName: "",
+  bankName: "",
+  bankAccountNumber: "",
+  bankBranch: "",
+  bankAccountType: "",
+  paymentInstructions: "",
+  enabled: { bkash: false, nagad: false, bank: false },
+};
+
 const EMPTY_SETTINGS: SettingsState = {
   organizationName: "Membrix",
   websiteUrl: "https://membrix.com",
@@ -101,6 +132,22 @@ export default function AdminSettingsPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<SectionKey>("organization");
   const [settings, setSettings] = useState<SettingsState>(EMPTY_SETTINGS);
+  const [paymentSettings, setPaymentSettings] =
+    useState<PaymentSettingsState>(EMPTY_PAYMENT_SETTINGS);
+  const [gatewaySettings, setGatewaySettings] =
+    useState<GatewaySettingsState>({
+      enabled: false,
+      mode: "sandbox",
+      storeId: "",
+      signatureKey: "",
+    });
+  const [gatewayStatus, setGatewayStatus] = useState<{
+    mode: "sandbox" | "live";
+    enabled: boolean;
+    configured: boolean;
+    credentialsStored: boolean;
+    recurringBillingAvailable: boolean;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -130,6 +177,31 @@ export default function AdminSettingsPage() {
           return;
         }
 
+        const paymentResponse = await fetch(`${API_URL}/api/payment-settings/admin`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!paymentResponse.ok) {
+          const result = (await paymentResponse.json()) as { message?: string };
+          throw new Error(result.message || "Unable to load payment settings.");
+        }
+        const paymentResult = (await paymentResponse.json()) as {
+          success?: boolean;
+          settings?: PaymentSettingsState;
+          gateway?: typeof gatewayStatus;
+        };
+        if (!cancelled && paymentResult.success && paymentResult.settings) {
+          setPaymentSettings(paymentResult.settings);
+          setGatewayStatus(paymentResult.gateway ?? null);
+          if (paymentResult.gateway) {
+            setGatewaySettings((current) => ({
+              ...current,
+              enabled: paymentResult.gateway!.enabled,
+              mode: paymentResult.gateway!.mode,
+            }));
+          }
+        }
+
         const response = await fetch(`${API_URL}/api/admin/settings`, {
           method: "GET",
           credentials: "include",
@@ -142,7 +214,7 @@ export default function AdminSettingsPage() {
             setSettings((current) => ({ ...current, ...previewSettings }));
           }
           if (!cancelled) {
-            setNotice("No backend admin settings endpoint is configured. The current values are preview-only and are stored in this browser.");
+            setNotice("Organization, membership, security and appearance settings are preview-only. Payment settings below are stored in the backend.");
           }
           return;
         }
@@ -154,13 +226,9 @@ export default function AdminSettingsPage() {
             setSettings((current) => ({ ...current, ...result.data }));
           }
         }
-      } catch {
+      } catch (loadError) {
         if (!cancelled) {
-          const previewSettings = readStoredPreviewSettings();
-          if (previewSettings) {
-            setSettings((current) => ({ ...current, ...previewSettings }));
-          }
-          setNotice("No live admin settings backend is configured. Changes below are treated as local UI preferences until a persistent API is added.");
+          setError(loadError instanceof Error ? loadError.message : "Unable to load admin settings.");
         }
       } finally {
         if (!cancelled) {
@@ -211,6 +279,49 @@ export default function AdminSettingsPage() {
     setSaving(true);
     setError("");
     setNotice("");
+
+    if (activeTab === "payments") {
+      try {
+        const response = await fetch(`${API_URL}/api/payment-settings/admin`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...paymentSettings,
+            gateway: gatewaySettings,
+          }),
+        });
+        const result = (await response.json()) as {
+          success?: boolean;
+          message?: string;
+          settings?: PaymentSettingsState;
+          gateway?: typeof gatewayStatus;
+        };
+        if (response.status === 401) {
+          router.replace("/login");
+          return;
+        }
+        if (!response.ok || !result.success || !result.settings) {
+          throw new Error(result.message || "Unable to save payment settings.");
+        }
+        setPaymentSettings(result.settings);
+        setGatewayStatus(result.gateway ?? null);
+        if (result.gateway) {
+          setGatewaySettings({
+            enabled: result.gateway.enabled,
+            mode: result.gateway.mode,
+            storeId: "",
+            signatureKey: "",
+          });
+        }
+        setNotice(result.message || "Payment settings saved.");
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "Unable to save payment settings.");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     const payload = {
       ...settings,
@@ -325,6 +436,10 @@ export default function AdminSettingsPage() {
                 <BadgeCheck size={18} />
                 Plans
               </Link>
+              <Link href="/admin/certificates" className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]">
+                <BadgeCheck size={18} />
+                Certificates
+              </Link>
               <Link href="/admin/settings" aria-current="page" className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-alt)] px-3.5 py-3 text-sm font-medium text-[var(--foreground)]">
                 <Settings size={18} className="text-[#e6ca8b]" />
                 Settings
@@ -384,7 +499,7 @@ export default function AdminSettingsPage() {
 
               <button type="submit" form="admin-settings-form" disabled={saving || loading} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--foreground)] px-4 text-sm font-medium text-[var(--background)] transition hover:opacity-90 disabled:opacity-60">
                 <Save size={16} />
-                {saving ? "Saving preview..." : "Save preview"}
+                {saving ? "Saving..." : activeTab === "payments" ? "Save payment settings" : "Save preview"}
               </button>
             </section>
 
@@ -393,7 +508,7 @@ export default function AdminSettingsPage() {
                 {error ? <AlertCircle size={18} className="mt-0.5 shrink-0 text-red-500" /> : <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-600" />}
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">
-                    {error ? "Unable to save settings" : "Settings saved"}
+                    {error ? "Settings error" : "Settings saved"}
                   </p>
                   <p className="mt-1 text-sm leading-5 text-[var(--muted)]">{error || notice}</p>
                 </div>
@@ -433,7 +548,9 @@ export default function AdminSettingsPage() {
                   <>
                     <div className="mb-5 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                       <ShieldCheck size={14} className="shrink-0" />
-                      Preview-only controls are clearly marked. Real organization and payment settings require a backend-backed admin endpoint.
+                      {activeTab === "payments"
+                        ? "Payment recipients are persisted securely. Gateway credentials remain server-side in environment configuration."
+                        : "Organization and appearance controls are preview-only in this installation."}
                     </div>
                     <div className="mb-6 border-b border-[var(--border)] pb-4">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#b99a5b]">
@@ -496,45 +613,118 @@ export default function AdminSettingsPage() {
                     )}
 
                     {activeTab === "payments" && (
-                      <div className="grid gap-5 md:grid-cols-2">
-                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
-                          <p className="text-sm font-medium">Manual bKash</p>
-                          <div className="mt-3 flex items-center justify-between gap-2">
-                            <span className="text-xs text-[var(--muted)]">Toggle payment method</span>
-                            <button type="button" onClick={() => updateToggle("allowBkash")} className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${settings.allowBkash ? "bg-[#d6b878]" : "bg-[var(--surface-alt)]"}`} aria-pressed={settings.allowBkash}>
-                              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition ${settings.allowBkash ? "translate-x-6" : "translate-x-1"}`} />
-                            </button>
-                          </div>
+                      <div className="space-y-7">
+                        <div className="grid gap-5 md:grid-cols-2">
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-medium">bKash recipient number</span>
+                            <input value={paymentSettings.bkashNumber} onChange={(event) => setPaymentSettings((current) => ({ ...current, bkashNumber: event.target.value }))} maxLength={30} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 py-3 text-sm" />
+                          </label>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-medium">Nagad recipient number</span>
+                            <input value={paymentSettings.nagadNumber} onChange={(event) => setPaymentSettings((current) => ({ ...current, nagadNumber: event.target.value }))} maxLength={30} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 py-3 text-sm" />
+                          </label>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-medium">Bank account name</span>
+                            <input value={paymentSettings.bankAccountName} onChange={(event) => setPaymentSettings((current) => ({ ...current, bankAccountName: event.target.value }))} maxLength={120} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 py-3 text-sm" />
+                          </label>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-medium">Bank name</span>
+                            <input value={paymentSettings.bankName} onChange={(event) => setPaymentSettings((current) => ({ ...current, bankName: event.target.value }))} maxLength={120} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 py-3 text-sm" />
+                          </label>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-medium">Account number</span>
+                            <input value={paymentSettings.bankAccountNumber} onChange={(event) => setPaymentSettings((current) => ({ ...current, bankAccountNumber: event.target.value }))} maxLength={60} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 py-3 text-sm" />
+                          </label>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-medium">Branch</span>
+                            <input value={paymentSettings.bankBranch} onChange={(event) => setPaymentSettings((current) => ({ ...current, bankBranch: event.target.value }))} maxLength={120} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 py-3 text-sm" />
+                          </label>
+                          <label className="block">
+                            <span className="mb-2 block text-sm font-medium">Account type</span>
+                            <input value={paymentSettings.bankAccountType} onChange={(event) => setPaymentSettings((current) => ({ ...current, bankAccountType: event.target.value }))} maxLength={60} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 py-3 text-sm" />
+                          </label>
+                          <label className="block md:col-span-2">
+                            <span className="mb-2 block text-sm font-medium">Payment instructions</span>
+                            <textarea value={paymentSettings.paymentInstructions} onChange={(event) => setPaymentSettings((current) => ({ ...current, paymentInstructions: event.target.value }))} maxLength={2000} rows={4} className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3.5 py-3 text-sm" />
+                          </label>
                         </div>
 
-                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
-                          <p className="text-sm font-medium">Manual Nagad</p>
-                          <div className="mt-3 flex items-center justify-between gap-2">
-                            <span className="text-xs text-[var(--muted)]">Toggle payment method</span>
-                            <button type="button" onClick={() => updateToggle("allowNagad")} className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${settings.allowNagad ? "bg-[#d6b878]" : "bg-[var(--surface-alt)]"}`} aria-pressed={settings.allowNagad}>
-                              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition ${settings.allowNagad ? "translate-x-6" : "translate-x-1"}`} />
+                        <div className="grid gap-3 md:grid-cols-3">
+                          {([
+                            ["bkash", "Enable bKash"],
+                            ["nagad", "Enable Nagad"],
+                            ["bank", "Enable bank transfer"],
+                          ] as const).map(([method, label]) => (
+                            <button key={method} type="button" aria-pressed={paymentSettings.enabled[method]} onClick={() => setPaymentSettings((current) => ({ ...current, enabled: { ...current.enabled, [method]: !current.enabled[method] } }))} className={`rounded-xl border px-4 py-3 text-left text-sm font-medium transition ${paymentSettings.enabled[method] ? "border-[#d6b878] bg-[#d6b878]/10" : "border-[var(--border)]"}`}>
+                              {label}: {paymentSettings.enabled[method] ? "Enabled" : "Disabled"}
                             </button>
-                          </div>
+                          ))}
                         </div>
 
-                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
-                          <p className="text-sm font-medium">Bank transfer</p>
-                          <div className="mt-3 flex items-center justify-between gap-2">
-                            <span className="text-xs text-[var(--muted)]">Toggle payment option</span>
-                            <button type="button" onClick={() => updateToggle("allowBankTransfers")} className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${settings.allowBankTransfers ? "bg-[#d6b878]" : "bg-[var(--surface-alt)]"}`} aria-pressed={settings.allowBankTransfers}>
-                              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition ${settings.allowBankTransfers ? "translate-x-6" : "translate-x-1"}`} />
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-5">
+                          <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                              <p className="text-sm font-semibold">AamarPay online gateway</p>
+                              <p className="mt-1 text-xs leading-5 text-[var(--muted)]">
+                                Configure independently from manual bKash, Nagad, and bank payments. Both can stay enabled simultaneously.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              aria-pressed={gatewaySettings.enabled}
+                              onClick={() => setGatewaySettings((current) => ({ ...current, enabled: !current.enabled }))}
+                              className={`rounded-xl border px-4 py-2.5 text-sm font-medium transition ${gatewaySettings.enabled ? "border-[#d6b878] bg-[#d6b878]/10" : "border-[var(--border)]"}`}
+                            >
+                              Gateway: {gatewaySettings.enabled ? "Enabled" : "Disabled"}
                             </button>
                           </div>
-                        </div>
 
-                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
-                          <p className="text-sm font-medium">Manual approval</p>
-                          <div className="mt-3 flex items-center justify-between gap-2">
-                            <span className="text-xs text-[var(--muted)]">Manual transactions require review</span>
-                            <button type="button" onClick={() => updateToggle("requireApprovalForManualPayments")} className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${settings.requireApprovalForManualPayments ? "bg-[#d6b878]" : "bg-[var(--surface-alt)]"}`} aria-pressed={settings.requireApprovalForManualPayments}>
-                              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition ${settings.requireApprovalForManualPayments ? "translate-x-6" : "translate-x-1"}`} />
-                            </button>
+                          <div className="mt-5 grid gap-4 md:grid-cols-2">
+                            <label className="block">
+                              <span className="mb-2 block text-sm font-medium">Environment</span>
+                              <select
+                                value={gatewaySettings.mode}
+                                onChange={(event) => setGatewaySettings((current) => ({ ...current, mode: event.target.value as GatewaySettingsState["mode"] }))}
+                                className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-sm"
+                              >
+                                <option value="sandbox">Sandbox</option>
+                                <option value="live">Live</option>
+                              </select>
+                            </label>
+                            <label className="block">
+                              <span className="mb-2 block text-sm font-medium">Merchant store ID</span>
+                              <input
+                                value={gatewaySettings.storeId}
+                                onChange={(event) => setGatewaySettings((current) => ({ ...current, storeId: event.target.value }))}
+                                maxLength={120}
+                                autoComplete="off"
+                                placeholder={gatewayStatus?.credentialsStored ? "Saved securely — enter only to replace" : "Enter store ID"}
+                                className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-sm"
+                              />
+                            </label>
+                            <label className="block md:col-span-2">
+                              <span className="mb-2 block text-sm font-medium">Merchant signature key</span>
+                              <input
+                                type="password"
+                                value={gatewaySettings.signatureKey}
+                                onChange={(event) => setGatewaySettings((current) => ({ ...current, signatureKey: event.target.value }))}
+                                maxLength={500}
+                                autoComplete="new-password"
+                                placeholder={gatewayStatus?.credentialsStored ? "Saved securely — enter only to replace" : "Enter signature key"}
+                                className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-sm"
+                              />
+                            </label>
                           </div>
+
+                          <p className="mt-4 text-xs leading-5 text-[var(--muted)]">
+                            Status: {gatewayStatus?.enabled ? "enabled" : "disabled"} · {gatewayStatus?.configured ? "credentials and callback URLs configured" : "configuration incomplete"} · recurring billing unavailable.
+                            Merchant credentials are encrypted at rest and never returned to the browser. Configure PAYMENT_SETTINGS_ENCRYPTION_KEY on the backend before saving credentials.
+                          </p>
+                          {gatewaySettings.mode === "live" && (
+                            <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5 text-amber-700 dark:text-amber-300">
+                              Live mode requires valid production merchant credentials and end-to-end testing. Saving this setting alone does not establish that live payments work.
+                            </p>
+                          )}
                         </div>
                       </div>
                     )}

@@ -14,6 +14,10 @@ export interface IMembership extends Document {
   status: MembershipStatus;
   startDate: Date | null;
   endDate: Date | null;
+  renewalOf?: Types.ObjectId | null;
+  autoRenewEnabled: boolean;
+  autoRenewConsentAt: Date | null;
+  autoRenewStatus: "unavailable" | "cancelled" | "active";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,11 +55,41 @@ const membershipSchema = new Schema<IMembership>(
       type: Date,
       default: null,
     },
+    renewalOf: {
+      type: Schema.Types.ObjectId,
+      ref: "Membership",
+      default: null,
+      index: true,
+    },
+    autoRenewEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    autoRenewConsentAt: {
+      type: Date,
+      default: null,
+    },
+    autoRenewStatus: {
+      type: String,
+      enum: ["unavailable", "cancelled", "active"],
+      default: "unavailable",
+    },
   },
   { timestamps: true },
 );
 
 membershipSchema.index({ user: 1, status: 1 });
+membershipSchema.index(
+  { renewalOf: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      renewalOf: { $type: "objectId" },
+      status: "pending",
+    },
+    name: "one_pending_renewal_per_membership",
+  },
+);
 
 const Membership: Model<IMembership> =
   (mongoose.models.Membership as Model<IMembership>) ||

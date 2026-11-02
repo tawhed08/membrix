@@ -35,7 +35,10 @@ router.get("/me", authenticate, async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const notifications = await Notification.find({ user: req.userId })
+    const notifications = await Notification.find({
+      user: req.userId,
+      isHidden: { $ne: true },
+    })
       .sort({ createdAt: -1 })
       .limit(20)
       .lean();

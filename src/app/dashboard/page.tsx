@@ -15,6 +15,11 @@ import { jsPDF } from "jspdf";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import ProfilePhotoEditor from "@/components/profile-photo-editor";
+import { downloadPaymentReceipt } from "@/lib/payment-receipt";
+import {
+  filterPaymentRecords,
+  type PaymentStatusFilter,
+} from "@/lib/payment-filter";
 import {
   Activity,
   ArrowDownLeft,
@@ -33,6 +38,7 @@ import {
   House,
   KeyRound,
   LayoutDashboard,
+  LoaderCircle,
   LogOut,
   LockKeyhole,
   Menu,
@@ -58,7 +64,26 @@ type Section =
   | "Payments"
   | "Settings";
 
-type PaymentStatus = "Completed" | "Pending" | "Failed";
+type PaymentStatus =
+  | "Completed"
+  | "Pending"
+  | "Processing"
+  | "Rejected"
+  | "Failed"
+  | "Refunded";
+
+const PAYMENT_STATUS_FILTERS: Array<{
+  value: PaymentStatusFilter;
+  label: string;
+}> = [
+  { value: "All", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "processing", label: "Processing" },
+  { value: "completed", label: "Completed" },
+  { value: "rejected", label: "Rejected" },
+  { value: "failed", label: "Failed" },
+  { value: "refunded", label: "Refunded" },
+];
 
 type PaymentRecord = {
   id: string;
@@ -74,6 +99,9 @@ type PaymentRecord = {
     | "refunded";
   transactionId: string | null;
   gatewayTransactionId: string | null;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  adminNote: string | null;
   membershipId: string | null;
   planName: string;
   createdAt: string;
@@ -112,6 +140,10 @@ type UserMembership = {
   startDate: string | null;
   endDate: string | null;
   createdAt: string;
+  autoRenewEnabled: boolean;
+  autoRenewStatus: "unavailable" | "cancelled" | "active";
+  autoRenewConsentAt: string | null;
+  hasRenewal: boolean;
   plan: MembershipPlanData | null;
 };
 
@@ -119,6 +151,8 @@ type CertificateData = {
   certificateId: string;
   status: string;
   issuedAt: string;
+  memberName: string;
+  organization: string;
   verificationUrl: string;
   qrCode: string;
   membership: {
@@ -211,20 +245,17 @@ const formatDate = (value: string | null) => {
 const getPaymentStatus = (
   status: PaymentRecord["status"],
 ): PaymentStatus => {
-  if (status === "completed") return "Completed";
-
-  if (status === "pending" || status === "processing") {
-    return "Pending";
-  }
-
-  return "Failed";
+  return status.charAt(0).toUpperCase() + status.slice(1) as PaymentStatus;
 };
 
 function StatusBadge({ status }: { status: PaymentStatus }) {
   const statusStyles: Record<PaymentStatus, string> = {
     Completed: "bg-emerald-100 text-emerald-700",
     Pending: "bg-amber-100 text-amber-700",
+    Processing: "bg-sky-100 text-sky-700",
+    Rejected: "bg-rose-100 text-rose-700",
     Failed: "bg-red-100 text-red-700",
+    Refunded: "bg-violet-100 text-violet-700",
   };
 
   return (
@@ -255,6 +286,8 @@ export default function DashboardPage() {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [paymentLoading, setPaymentLoading] = useState(true);
   const [paymentError, setPaymentError] = useState("");
+  const [receiptDownloadingId, setReceiptDownloadingId] = useState<string | null>(null);
+  const [receiptError, setReceiptError] = useState("");
 
   // Profile
   const [profile, setProfile] = useState<Profile>(initialProfile);
@@ -291,7 +324,7 @@ export default function DashboardPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] =
-    useState<"All" | PaymentStatus>("All");
+    useState<PaymentStatusFilter>("All");
   const [notice, setNotice] = useState("");
   const [notificationList, setNotificationList] = useState<
     NotificationRecord[]
@@ -1265,6 +1298,26 @@ export default function DashboardPage() {
     showNotice(notification.message);
   };
 
+  const handleDownloadPaymentReceipt = async (
+    paymentId: string,
+    kind: "submission" | "final",
+  ) => {
+    if (receiptDownloadingId) return;
+    setReceiptDownloadingId(paymentId);
+    setReceiptError("");
+    try {
+      await downloadPaymentReceipt(API_URL, paymentId, kind);
+    } catch (error) {
+      setReceiptError(
+        error instanceof Error
+          ? error.message
+          : "Unable to download the payment receipt.",
+      );
+    } finally {
+      setReceiptDownloadingId(null);
+    }
+  };
+
   // --------------------------------------------------
   // 12. PAYMENT SUMMARY AND FILTERING
   // --------------------------------------------------
@@ -1283,24 +1336,11 @@ export default function DashboardPage() {
     )
     .reduce((total, payment) => total + payment.amount, 0);
 
-  const filteredPayments = payments.filter((payment) => {
-    const query = searchQuery.trim().toLowerCase();
-
-    const statusLabel = getPaymentStatus(payment.status);
-
-    const matchesSearch =
-      `${payment.id} ${payment.transactionId ?? ""} ${
-        payment.planName
-      } ${payment.method} ${statusLabel}`
-        .toLowerCase()
-        .includes(query);
-
-    const matchesStatus =
-      paymentStatusFilter === "All" ||
-      statusLabel === paymentStatusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
+  const filteredPayments = filterPaymentRecords(
+    payments,
+    searchQuery,
+    paymentStatusFilter,
+  );
 
   // --------------------------------------------------
   // 13. MEMBERSHIP SUMMARY
@@ -2457,6 +2497,23 @@ export default function DashboardPage() {
                                 </p>
                               </div>
                             </div>
+
+                            <div className="relative z-10 mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-white/10 pt-5">
+                              <p className="text-xs leading-5 text-white/65">
+                                Automatic renewal is unavailable for this payment gateway. Renewal requires a new payment and administrator review.
+                              </p>
+                              {plan?.billingType === "yearly" &&
+                                !membership.hasRenewal &&
+                                (membership.status === "active" ||
+                                  membership.status === "expired") && (
+                                  <Link
+                                    href={`/checkout?renew=${encodeURIComponent(membership.membershipId)}&plan=${encodeURIComponent(plan.slug)}`}
+                                    className="inline-flex items-center gap-2 rounded-xl bg-[#d6b878] px-4 py-2.5 text-sm font-semibold text-[#1d160c] transition hover:bg-[#e2c98f]"
+                                  >
+                                    Renew now <ArrowRight size={15} />
+                                  </Link>
+                                )}
+                            </div>
                           </article>
                         );
                       })}
@@ -2607,25 +2664,41 @@ export default function DashboardPage() {
                       />
                     </div>
 
-                    <select
-                      value={paymentStatusFilter}
-                      onChange={(event) =>
-                        setPaymentStatusFilter(
-                          event.target.value as
-                            | "All"
-                            | PaymentStatus,
-                        )
-                      }
-                      aria-label="Filter payments by status"
-                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 text-sm outline-none focus:border-[var(--gold)] sm:w-40"
-                    >
-                      <option value="All">All statuses</option>
-                      <option value="Completed">Completed</option>
-                      <option value="Pending">Pending</option>
-                      <option value="Failed">Failed</option>
-                    </select>
                   </div>
                 </div>
+
+                <div
+                  className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
+                  aria-label="Filter payments by status"
+                >
+                  {PAYMENT_STATUS_FILTERS.map(({ value, label }) => {
+                    const selected = paymentStatusFilter === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setPaymentStatusFilter(value)}
+                        className={`shrink-0 rounded-full border px-3.5 py-2 text-xs font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--gold)] ${
+                          selected
+                            ? "border-[var(--gold)] bg-[var(--gold)]/15 text-[var(--foreground)]"
+                            : "border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] hover:bg-[var(--surface)]"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {receiptError && (
+                  <div
+                    role="alert"
+                    className="rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-600 dark:text-red-300"
+                  >
+                    {receiptError}
+                  </div>
+                )}
 
                 {/* Payment summary */}
                 <div className="grid gap-4 sm:grid-cols-3">
@@ -2752,6 +2825,13 @@ export default function DashboardPage() {
                                   {payment.transactionId ||
                                     payment.id}
                                 </p>
+                                {payment.reviewedAt && (
+                                  <p className="mt-1 max-w-xs text-[11px] text-[var(--muted-foreground)]">
+                                    Reviewed {payment.reviewedBy ? `by ${payment.reviewedBy} ` : ""}
+                                    {formatDate(payment.reviewedAt)}
+                                    {payment.adminNote ? ` · ${payment.adminNote}` : ""}
+                                  </p>
+                                )}
                               </td>
 
                               <td className="whitespace-nowrap px-5 py-4 text-xs text-[var(--muted-foreground)]">
@@ -2777,7 +2857,41 @@ export default function DashboardPage() {
                               </td>
 
                               <td className="px-5 py-4 text-right text-xs text-[var(--muted-foreground)]">
-                                —
+                                {payment.status === "completed" ||
+                                (payment.status === "pending" &&
+                                  ["bkash", "nagad", "bank"].includes(
+                                    payment.method,
+                                  )) ? (
+                                  <button
+                                    type="button"
+                                    disabled={receiptDownloadingId !== null}
+                                    onClick={() =>
+                                      void handleDownloadPaymentReceipt(
+                                        payment.id,
+                                        payment.status === "completed"
+                                          ? "final"
+                                          : "submission",
+                                      )
+                                    }
+                                    className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--foreground)] transition hover:border-[var(--gold)] hover:bg-[var(--surface)] disabled:cursor-wait disabled:opacity-60"
+                                  >
+                                    {receiptDownloadingId === payment.id ? (
+                                      <LoaderCircle
+                                        size={14}
+                                        className="animate-spin"
+                                      />
+                                    ) : (
+                                      <Download size={14} />
+                                    )}
+                                    {receiptDownloadingId === payment.id
+                                      ? "Downloading..."
+                                      : payment.status === "completed"
+                                        ? "Download Final Receipt"
+                                        : "Download Submission Receipt"}
+                                  </button>
+                                ) : (
+                                  "—"
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -3587,8 +3701,13 @@ export default function DashboardPage() {
                             data-certificate-name
                             className="mt-2 break-words text-2xl font-semibold text-[var(--foreground)] sm:text-3xl"
                           >
-                            {profile.name || "Membrix Member"}
+                            {certificateData.memberName || "Membrix Member"}
                           </h3>
+                          {certificateData.organization && (
+                            <p className="mt-1 text-sm font-medium text-[var(--muted-foreground)]">
+                              {certificateData.organization}
+                            </p>
+                          )}
 
                           <p
                             data-certificate-description
@@ -3669,6 +3788,12 @@ export default function DashboardPage() {
                                 {new Date(
                                   certificateData.issuedAt,
                                 ).toLocaleDateString("en-GB")}
+                              </p>
+                              <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                                Expires:{" "}
+                                {certificateData.membership.endDate
+                                  ? new Date(certificateData.membership.endDate).toLocaleDateString("en-GB")
+                                  : "No expiry"}
                               </p>
                             </div>
 

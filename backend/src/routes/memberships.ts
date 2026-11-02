@@ -19,6 +19,10 @@ type MembershipRecord = {
   status: "pending" | "active" | "expired" | "cancelled";
   startDate: Date | null;
   endDate: Date | null;
+  autoRenewEnabled: boolean;
+  autoRenewStatus: "unavailable" | "cancelled" | "active";
+  autoRenewConsentAt: Date | null;
+  renewalOf?: { membershipId: string } | null;
   createdAt: Date;
   plan: MembershipPlanData | null;
 };
@@ -45,11 +49,18 @@ router.get(
           path: "plan",
           select: "name slug price billingType durationDays features",
         })
+        .populate({ path: "renewalOf", select: "membershipId" })
         .sort({ createdAt: -1 })
         .lean()
         .exec();
 
       const memberships = records as unknown as MembershipRecord[];
+      const renewedMembershipIds = new Set(
+        memberships
+          .filter((membership) => membership.status !== "cancelled")
+          .map((membership) => membership.renewalOf?.membershipId)
+          .filter((membershipId): membershipId is string => Boolean(membershipId)),
+      );
 
       res.status(200).json({
         success: true,
@@ -58,6 +69,10 @@ router.get(
           status: membership.status,
           startDate: membership.startDate,
           endDate: membership.endDate,
+          autoRenewEnabled: membership.autoRenewEnabled ?? false,
+          autoRenewStatus: membership.autoRenewStatus ?? "unavailable",
+          autoRenewConsentAt: membership.autoRenewConsentAt ?? null,
+          hasRenewal: renewedMembershipIds.has(membership.membershipId),
           createdAt: membership.createdAt,
           plan: membership.plan
             ? {

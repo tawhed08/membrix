@@ -12,9 +12,15 @@ export interface ICertificate extends Document {
   verificationToken: string;
   user: Types.ObjectId;
   membership: Types.ObjectId;
+  membershipIdSnapshot: string;
+  memberName: string;
+  organizationName: string;
+  planName: string;
+  expiresAt: Date | null;
   status: CertificateStatus;
   issuedAt: Date;
   revokedAt: Date | null;
+  revocationReason: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -45,6 +51,34 @@ const certificateSchema = new Schema<ICertificate>(
       required: true,
       unique: true,
     },
+    membershipIdSnapshot: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: "",
+    },
+    memberName: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: "",
+    },
+    organizationName: {
+      type: String,
+      trim: true,
+      maxlength: 150,
+      default: "",
+    },
+    planName: {
+      type: String,
+      trim: true,
+      maxlength: 80,
+      default: "",
+    },
+    expiresAt: {
+      type: Date,
+      default: null,
+    },
     status: {
       type: String,
       enum: ["issued", "revoked"],
@@ -58,6 +92,12 @@ const certificateSchema = new Schema<ICertificate>(
     },
     revokedAt: {
       type: Date,
+      default: null,
+    },
+    revocationReason: {
+      type: String,
+      trim: true,
+      maxlength: 500,
       default: null,
     },
   },
